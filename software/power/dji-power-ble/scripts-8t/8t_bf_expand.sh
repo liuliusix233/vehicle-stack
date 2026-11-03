@@ -2,7 +2,7 @@
 # 盲扫 A002 行展开
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 for y in 1160 1225 1280; do
   for x in 500 700 200; do
     "$ADB" -s $DEV shell input tap $x $y 2>&1

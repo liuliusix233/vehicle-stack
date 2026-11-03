@@ -2,7 +2,7 @@
 # 批量添加特征 v3（动态定位，无 keyevent 4）
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 
 add_char() {
   local UUID=$1 PROPS=$2

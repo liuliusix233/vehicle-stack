@@ -2,7 +2,7 @@
 # 当前特征列表
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 "$ADB" -s $DEV shell uiautomator dump /sdcard/all.xml 2>&1 >/dev/null
 "$ADB" -s $DEV pull /sdcard/all.xml /home/<USER>/.openclaw/workspace/jarvis/tmp/all.xml 2>&1 >/dev/null
 python3 -c "

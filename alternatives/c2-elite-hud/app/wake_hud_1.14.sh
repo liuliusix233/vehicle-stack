@@ -1,7 +1,7 @@
 #!/bin/bash
 # wake_hud.sh — Pi 上执行: 唤醒 HUD 屏幕 → 保持常亮 → 确保 app 前台 → Theme B → 截图
 set -e
-HUD_IP=<LAN_IP>
+HUD_IP="${HUD_IP:-192.0.2.10}"   # 改成车机 IP
 S="adb -s $HUD_IP:5555"
 
 echo "== wake =="

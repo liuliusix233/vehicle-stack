@@ -2,7 +2,7 @@
 # Edit service -> Custom -> A003
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 echo "=== open spinner ==="
 "$ADB" -s $DEV shell input tap 500 1295 2>&1
 sleep 2

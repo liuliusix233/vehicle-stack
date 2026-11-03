@@ -2,7 +2,7 @@
 # 进 Server 页截图看启用按钮
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 "$ADB" -s $DEV shell input tap 72 178 2>&1
 sleep 2
 "$ADB" -s $DEV shell input tap 394 650 2>&1

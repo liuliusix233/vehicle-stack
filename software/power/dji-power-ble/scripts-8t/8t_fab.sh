@@ -2,7 +2,7 @@
 # dump 找右下角按钮
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 python3 << 'EOF'
 import re
 xml = open('/home/<USER>/.openclaw/workspace/jarvis/tmp/adv2.xml', encoding='utf-8', errors='ignore').read()

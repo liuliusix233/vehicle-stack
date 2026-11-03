@@ -2,7 +2,7 @@
 # 跳过教程
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 for i in 1 2 3; do
   "$ADB" -s $DEV shell input swipe 900 1400 200 1400 300 2>&1
   sleep 2

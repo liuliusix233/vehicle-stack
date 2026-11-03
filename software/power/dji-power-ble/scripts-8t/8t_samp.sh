@@ -2,7 +2,7 @@
 # 进入 Sample configuration 编辑
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 "$ADB" -s $DEV shell input tap 525 317 2>&1
 sleep 2
 "$ADB" -s $DEV shell screencap -p /sdcard/sc.png 2>&1

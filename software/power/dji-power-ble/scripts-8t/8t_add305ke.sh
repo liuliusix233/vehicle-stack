@@ -2,7 +2,7 @@
 # 补加 C305 (Notify) - keyevent 输入
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 
 echo "=== cancel current dlg ==="
 "$ADB" -s $DEV shell input tap 687 1424 2>&1

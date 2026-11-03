@@ -2,7 +2,7 @@
 # 8T 服务列表确认
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 "$ADB" -s $DEV shell uiautomator dump /sdcard/all2.xml 2>&1 >/dev/null
 "$ADB" -s $DEV pull /sdcard/all2.xml /home/<USER>/.openclaw/workspace/jarvis/tmp/all2.xml 2>&1 >/dev/null
 python3 -c "

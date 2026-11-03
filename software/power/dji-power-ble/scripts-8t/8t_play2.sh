@@ -2,7 +2,7 @@
 # 播放 + duration OK + 验证广播数据
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 echo "=== clear logcat ==="
 "$ADB" -s $DEV logcat -c 2>&1
 echo "=== tap play (984,509) ==="

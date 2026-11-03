@@ -2,7 +2,7 @@
 # 重启 nRF + 去 ADVERTISER
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 "$ADB" -s $DEV shell monkey -p no.nordicsemi.android.mcp -c android.intent.category.LAUNCHER 1 2>&1 | tail -1
 sleep 4
 "$ADB" -s $DEV shell uiautomator dump /sdcard/adv1.xml 2>&1 >/dev/null

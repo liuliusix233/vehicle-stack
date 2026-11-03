@@ -2,7 +2,7 @@
 # 8T 装 ADBKeyboard
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 echo "=== install ==="
 "$ADB" -s $DEV install -r /home/<USER>/.openclaw/workspace/jarvis/tmp/adbkeyboard.apk 2>&1 | tail -2
 echo "=== enable + set ime ==="

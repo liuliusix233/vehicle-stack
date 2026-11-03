@@ -2,7 +2,7 @@
 # 补加 C305/C306（处理 CCCD 确认）
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 
 add_char() {
   local UUID=$1 PROPS=$2

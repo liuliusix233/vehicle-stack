@@ -2,7 +2,7 @@
 # 8T 自己扫描测试（蓝牙硬件）
 export PATH=$PATH:$HOME/platform-tools:/usr/local/bin:/usr/bin
 ADB=$(command -v adb || echo adb)
-DEV=<LAN_IP>:39777
+DEV="${DEV:-192.0.2.10:39777}"   # 改成车机 IP:端口
 echo "=== 8T to scanner ==="
 "$ADB" -s $DEV shell input keyevent 3 2>&1
 sleep 2
