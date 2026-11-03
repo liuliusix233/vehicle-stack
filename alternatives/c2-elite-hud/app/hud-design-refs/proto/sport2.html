@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=480, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HUD SPORT v2 — 字体/排版重构</title>
+<style>
+  /* 字体候选：?f=rajdhani|saira|chakra|barlow 即可整屏切换 */
+  @font-face{font-family:'Rajdhani';src:url('fonts/Rajdhani-Bold.ttf') format('truetype');font-display:block}
+  @font-face{font-family:'SairaCond';src:url('fonts/SairaCondensed-Bold.ttf') format('truetype');font-display:block}
+  @font-face{font-family:'ChakraPetch';src:url('fonts/ChakraPetch-Bold.ttf') format('truetype');font-display:block}
+  @font-face{font-family:'BarlowSC';src:url('fonts/BarlowSemiCondensed-Bold.ttf') format('truetype');font-display:block}
+  :root{
+    --bg:#000;
+    --num:'Rajdhani',system-ui,sans-serif;
+    --lbl:system-ui,'Noto Sans CJK SC',sans-serif;
+    --fg:#fff;
+    --dim:#93a6b5;          /* 次级文字（已提亮，≥13px） */
+    --dim2:#2a3b4c;         /* 未点亮的段/空槽 */
+    --track:#101d28;
+    --line:#1b2b38;
+    --acc:#FF5722; --amber:#FFB300; --green:#4CAF50; --blue:#39a5ff;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{width:480px;height:240px;overflow:hidden;background:var(--bg)}
+  body{position:relative;font-family:var(--num);font-weight:700;color:var(--fg)}
+  .v{position:absolute;left:0;top:0;width:480px;height:240px;display:none;overflow:hidden}
+  body[data-v="s1"] .v.s1{display:block}
+  body[data-v="s2"] .v.s2{display:block}
+  body.no-anim *{transition:none!important;animation:none!important}
+  .L{font-family:var(--lbl);font-weight:800;color:var(--dim);letter-spacing:.06em}
+
+  /* 数字翻滚 */
+  .digits{display:flex;align-items:flex-end}
+  .digit{position:relative;height:1em;overflow:hidden;width:.52em}
+  .dstrip{display:flex;flex-direction:column;will-change:transform}
+  .dstrip span{height:1em;line-height:1;display:block}
+
+  .track{background:var(--track);overflow:hidden;border-radius:3px}
+  .fill{height:100%;width:0%;transition:width .18s ease-out}
+  .fill.fue{background:var(--amber)}
+  .fill.bat{background:var(--blue)}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--dim2);display:inline-block}
+  .dot.on.p{background:var(--blue);box-shadow:0 0 7px rgba(57,165,255,.95)}
+  .dot.on.n{background:var(--green);box-shadow:0 0 7px rgba(76,175,80,.95)}
+
+  /* 换挡灯带 —— 全屏最上一条，块大、间距宽 */
+  .shift{display:flex;gap:5px}
+  .seg{flex:1;height:22px;background:var(--dim2);border-radius:4px;transition:background .09s linear,box-shadow .09s linear}
+  .seg.g{background:var(--green)} .seg.a{background:var(--amber)} .seg.r{background:var(--acc)}
+  .shift.hot .seg.a,.shift.hot .seg.r{background:#fff;box-shadow:0 0 16px #fff}
+  .shift.hot{animation:strobe .09s steps(1,end) infinite alternate}
+  @keyframes strobe{from{filter:brightness(1)}to{filter:brightness(1.8)}}
+
+  .hdg{text-align:right;line-height:1.05;white-space:nowrap}
+  .hdg b{font-size:26px;color:var(--acc);letter-spacing:.02em}
+  .hdg span{font-size:18px;color:var(--dim);margin-left:6px}
+
+  /* ══════ S1 · GT3 DDU（重构版）══════ */
+  .s1 .row-top{position:absolute;left:14px;top:10px;width:452px;height:22px;display:flex;align-items:center;gap:14px}
+  .s1 .shift{width:344px;flex:none}
+  .s1 .spd{position:absolute;left:14px;top:52px;width:192px;height:144px;display:flex;flex-direction:column;justify-content:flex-end}
+  .s1 .spd-l{font-size:20px;color:var(--dim);letter-spacing:.18em;margin-left:6px;margin-bottom:4px;font-family:var(--lbl);font-weight:800}
+  .s1 .spd .digits{font-size:112px;filter:drop-shadow(0 0 10px rgba(255,255,255,.28))}
+  .s1 .tach{position:absolute;left:212px;top:52px;width:150px;height:150px}
+  .s1 .tach svg{width:150px;height:150px;display:block}
+  .s1 .cap-rpm{position:absolute;left:50%;top:0;transform:translateX(-50%);font-size:13px;color:var(--dim);letter-spacing:.24em;font-family:var(--lbl);font-weight:800}
+  .s1 .gear{position:absolute;left:50%;top:34px;transform:translateX(-50%);font-size:46px;line-height:1}
+  .s1 .gear.flash{color:var(--acc);text-shadow:0 0 18px var(--acc)}
+  .s1 .rpm-t{position:absolute;left:50%;top:114px;transform:translateX(-50%);font-size:27px;line-height:1;white-space:nowrap}
+  .s1 .rpm-t i{font-style:normal;font-size:14px;color:var(--dim);margin-left:7px;font-family:var(--lbl);font-weight:800}
+  .s1 .stack{position:absolute;right:14px;top:62px;width:98px;display:flex;flex-direction:column;gap:26px}
+  .s1 .st .h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .s1 .st .h i{font-style:normal;font-size:15px;font-family:var(--lbl);font-weight:800;color:var(--dim);letter-spacing:.06em}
+  .s1 .st .h em{font-style:normal;font-size:21px;color:#fff}
+  .s1 .st .track{height:14px}
+  .s1 .st.pulse .h em,.s1 .st.pulse .h i{color:var(--acc)}
+  .s1 .st.pulse .fill.fue{background:var(--acc);animation:fuelpulse 1.2s ease-in-out infinite}
+  @keyframes fuelpulse{0%,100%{opacity:1}50%{opacity:.22}}
+  .row-bot{position:absolute;left:0;bottom:0;width:480px;height:40px;display:flex;align-items:center;
+           padding:0 14px;gap:20px;border-top:2px solid var(--line)}
+  .b-odo{display:flex;align-items:baseline;gap:6px}
+  .b-odo b{font-size:27px;color:#fff;letter-spacing:.01em}
+  .sys{display:flex;align-items:center;gap:6px}
+  .sys b{font-size:19px;color:#8fd6ff;margin-left:2px}
+  .b-clock{margin-left:auto;font-size:27px;color:#fff;letter-spacing:.03em}
+
+  /* ══════ S2 · 速度优先（重构版）══════ */
+  .s2 .row-top{position:absolute;left:14px;top:10px;width:452px;height:22px;display:flex;align-items:center;gap:14px}
+  .s2 .shift{width:286px;flex:none}
+  .s2 .col-l{position:absolute;left:14px;top:60px;width:92px;text-align:center}
+  .s2 .col-l .gear{font-size:68px;line-height:1}
+  .s2 .col-l .gear.flash{color:var(--acc);text-shadow:0 0 18px var(--acc)}
+  .s2 .col-l .vlt{font-size:19px;color:#8fd6ff;margin-top:14px}
+  .s2 .spd{position:absolute;left:112px;top:44px;width:228px;text-align:center}
+  .s2 .spd-l{font-size:20px;color:var(--dim);letter-spacing:.22em;font-family:var(--lbl);font-weight:800}
+  .s2 .spd .digits{font-size:104px;justify-content:center;filter:drop-shadow(0 0 11px rgba(255,255,255,.3))}
+  .s2 .rpm-n{position:absolute;right:14px;top:48px;width:126px;text-align:right;line-height:1}
+  .s2 .rpm-n b{font-size:46px;color:#fff}
+  .s2 .rpm-n i{font-style:normal;font-size:15px;color:var(--dim);margin-left:6px;font-family:var(--lbl);font-weight:800}
+  .s2 .rpm-bar{position:absolute;left:14px;width:452px;top:174px;display:flex;gap:4px}
+  .s2 .rseg{flex:1;height:20px;background:var(--dim2);border-radius:3px;transition:background .09s linear}
+  .s2 .rseg.g{background:var(--green)} .s2 .rseg.a{background:var(--amber)} .s2 .rseg.r{background:var(--acc)}
+  .s2 .rpm-bar.on .rseg.r{background:#fff;box-shadow:0 0 12px #fff}
+  .s2 .row-bot{height:40px;top:200px;bottom:auto;gap:16px}
+  .s2 .en{width:104px}
+  .s2 .en .h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+  .s2 .en .h i{font-style:normal;font-size:13px;font-family:var(--lbl);font-weight:800;color:var(--dim)}
+  .s2 .en .h em{font-style:normal;font-size:18px;color:#fff}
+  .s2 .en .track{height:11px}
+  .s2 .en.pulse .h i,.s2 .en.pulse .h em{color:var(--acc)}
+  .s2 .en.pulse .fill.fue{background:var(--acc);animation:fuelpulse 1.2s ease-in-out infinite}
+</style>
+</head>
+<body data-v="s1">
+
+<!-- ══════ S1 · GT3 DDU ══════ -->
+<div class="v s1">
+  <div class="row-top">
+    <div class="shift" id="s1shift"></div>
+    <div class="hdg" style="flex:1"><b id="s1card">NW</b><span id="s1deg">312°</span></div>
+  </div>
+
+  <div class="spd">
+    <div class="spd-l">KM/H</div>
+    <div class="digits" id="s1spd"></div>
+  </div>
+
+  <div class="tach">
+    <svg viewBox="0 0 150 150"><g id="s1segs"></g></svg>
+    <div class="gear" id="s1gear">N</div>
+    <div class="rpm-t" id="s1rpmn">0<i>RPM</i></div>
+  </div>
+
+  <div class="stack">
+    <div class="st" id="s1fueBox">
+      <div class="h"><i>FUEL</i><em id="s1fuev">--%</em></div>
+      <div class="track"><div class="fill fue" id="s1fuef"></div></div>
+    </div>
+    <div class="st" id="s1batBox">
+      <div class="h"><i>BAT</i><em id="s1batv">--%</em></div>
+      <div class="track"><div class="fill bat" id="s1batf"></div></div>
+    </div>
+  </div>
+
+  <div class="row-bot">
+    <span class="b-odo"><span class="L" style="font-size:15px">ODO</span><b id="s1odo">--</b><span class="L" style="font-size:14px">KM</span></span>
+    <span class="sys"><i class="dot p on" id="s1pi"></i><i class="dot n on" id="s1nan"></i><b id="s1pw">9W</b></span>
+    <span class="b-item" style="font-size:21px;color:#8fd6ff" id="s1voltv">--V</span>
+    <span class="b-clock" id="s1clk">--:--</span>
+  </div>
+</div>
+
+<!-- ══════ S2 · 速度优先 ══════ -->
+<div class="v s2">
+  <div class="row-top">
+    <div class="shift" id="s2shift"></div>
+    <div class="hdg" style="flex:1"><b id="s2card">NW</b><span id="s2deg">312°</span></div>
+  </div>
+
+  <div class="col-l">
+    <div class="gear" id="s2gear">N</div>
+    <div class="vlt" id="s2voltv">--V</div>
+  </div>
+
+  <div class="spd">
+    <div class="spd-l">KM/H</div>
+    <div class="digits" id="s2spd"></div>
+  </div>
+
+  <div class="rpm-n"><b id="s2rpmn">0</b><i>RPM</i></div>
+
+  <div class="rpm-bar" id="s2rbar"></div>
+
+  <div class="row-bot s2">
+    <span class="b-odo"><span class="L" style="font-size:15px">ODO</span><b id="s2odo">--</b><span class="L" style="font-size:14px">KM</span></span>
+    <div class="en" id="s2fueBox">
+      <div class="h"><i>FUEL</i><em id="s2fuev">--%</em></div>
+      <div class="track"><div class="fill fue" id="s2fuef"></div></div>
+    </div>
+    <div class="en" id="s2batBox">
+      <div class="h"><i>BAT</i><em id="s2batv">--%</em></div>
+      <div class="track"><div class="fill bat" id="s2batf"></div></div>
+    </div>
+    <span class="b-clock" id="s2clk">--:--</span>
+  </div>
+</div>
+
+<script>
+const RPM_MAX = 7000, SEG = 22, SHIFT_N = 14, A0 = 135, A1 = 405;
+const $ = id => document.getElementById(id);
+
+function buildShift(el, host){ el.innerHTML=''; for (let i=0;i<SHIFT_N;i++){ const d=document.createElement('div'); d.className='seg'; el.appendChild(d); } }
+buildShift($('s1shift')); buildShift($('s2shift'));
+
+const CX = 75, CY = 62, R = 48;
+const pt = a => [CX + R*Math.cos(a*Math.PI/180), CY + R*Math.sin(a*Math.PI/180)];
+(function arc(){
+  const g = $('s1segs'), step = (A1-A0)/SEG, gap = 2.8;
+  const [bx0,by0]=pt(A0), [bx1,by1]=pt(A1);
+  g.insertAdjacentHTML('beforeend',
+    `<path d="M${bx0} ${by0} A${R} ${R} 0 1 1 ${bx1} ${by1}" fill="none" stroke="#16242f" stroke-width="15" stroke-linecap="round"/>`);
+  for (let i=0;i<SEG;i++){
+    const [x0,y0]=pt(A0+i*step+gap/2), [x1,y1]=pt(A0+(i+1)*step-gap/2);
+    g.insertAdjacentHTML('beforeend',
+      `<path id="s1seg${i}" d="M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1}" fill="none" stroke="#1e3040" stroke-width="15" stroke-linecap="butt"/>`);
+  }
+})();
+(function bar(){ const el=$('s2rbar'); for(let i=0;i<SEG;i++){ const d=document.createElement('div'); d.className='rseg'; el.appendChild(d);} })();
+
+const zone = (i,n) => i/n < .60 ? 'g' : i/n < .84 ? 'a' : 'r';
+const ARC_ZONE = i => i < 13 ? '#4CAF50' : i < 18 ? '#FFB300' : '#FF5722';
+
+function buildDigits(host, n){
+  host.innerHTML = ''; const cols=[];
+  for (let c=0;c<n;c++){
+    const col=document.createElement('div'); col.className='digit';
+    const strip=document.createElement('div'); strip.className='dstrip';
+    ['', '0','1','2','3','4','5','6','7','8','9','0'].forEach(t=>{ const s=document.createElement('span'); s.textContent=t; strip.appendChild(s); });
+    col.appendChild(strip); host.appendChild(col); cols.push({strip,pos:0});
+  }
+  return cols;
+}
+function setDigits(cols, value){
+  const s = String(Math.round(value));
+  for (let i=0;i<cols.length;i++){
+    const ch = s[s.length-cols.length+i], cur = cols[i];
+    let pos = (ch===undefined||isNaN(+ch)) ? 0 : +ch+1;
+    if (cur.pos===10 && pos===1) pos=11;
+    if (cur.pos===11) cur.pos=1;
+    cur.strip.style.transform = `translateY(${-pos}em)`; cur.pos = pos;
+    if (pos===11){
+      setTimeout(()=>{ cur.strip.style.transition='none'; cur.strip.style.transform='translateY(-1em)';
+        setTimeout(()=>{cur.strip.style.transition='';},40); cur.pos=1; }, 300);
+    }
+  }
+}
+const cS1 = buildDigits($('s1spd'),3), cS2 = buildDigits($('s2spd'),3);
+
+const CARD=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const card = h => CARD[Math.round(((h%360)+360)%360/22.5)%16];
+function calcGear(speed, rpm){
+  if (speed<1||rpm<100) return 'N';
+  const ra=speed/(rpm/1000), tt=[0,12.5,13.8,16.9,21.6,28.7,41.4,55.5,67.2,999];
+  for (let g=1;g<=9;g++) if (ra<tt[g]) return String(g);
+  return '9';
+}
+
+function applyState(s){
+  const pct = Math.max(0, Math.min(1, (s.rpm||0)/RPM_MAX));
+  const lit = Math.round(pct*SEG), litS = Math.round(pct*SHIFT_N), hot = pct >= .92;
+
+  [].forEach.call($('s1shift').children,(d,i)=>{ d.className='seg'+(i<litS?' '+zone(i,SHIFT_N):''); });
+  [].forEach.call($('s2shift').children,(d,i)=>{ d.className='seg'+(i<litS?' '+zone(i,SHIFT_N):''); });
+  $('s1shift').classList.toggle('hot',hot); $('s2shift').classList.toggle('hot',hot);
+  for (let i=0;i<SEG;i++) $('s1seg'+i).setAttribute('stroke', i<lit ? ARC_ZONE(i) : '#1e3040');
+  [].forEach.call($('s2rbar').children,(d,i)=>{ d.className='rseg'+(i<lit?' '+zone(i,SEG):''); });
+  $('s2rbar').classList.toggle('on',hot);
+
+  const spd = s.speed>=0 ? s.speed : 0;
+  setDigits(cS1,spd); setDigits(cS2,spd);
+
+  const g = s.gear || calcGear(spd, s.rpm);
+  $('s1gear').textContent = g; $('s2gear').textContent = g;
+  $('s1gear').classList.toggle('flash',!!s.gearFlash);
+  $('s2gear').classList.toggle('flash',!!s.gearFlash);
+  $('s1rpmn').innerHTML = (s.rpm>=0?Math.round(s.rpm):'--')+'<i>RPM</i>';
+  $('s2rpmn').textContent = s.rpm>=0?Math.round(s.rpm):'--';
+
+  const fue=s.fuel, bat=s.bat, low = fue>=0 && fue<15;
+  $('s1fuef').style.width = $('s2fuef').style.width = (fue>=0?fue+'%':'0%');
+  $('s1batf').style.width = $('s2batf').style.width = (bat>=0?bat+'%':'0%');
+  $('s1fuev').textContent = $('s2fuev').textContent = (fue>=0?Math.round(fue)+'%':'--%');
+  $('s1batv').textContent = $('s2batv').textContent = (bat>=0?Math.round(bat)+'%':'--%');
+  $('s1fueBox').classList.toggle('pulse',low); $('s2fueBox').classList.toggle('pulse',low);
+  $('s1voltv').textContent = $('s2voltv').textContent = (s.volt>=0?s.volt.toFixed(1)+'V':'--V');
+
+  const h = s.heading>=0 ? ((Math.round(s.heading)%360)+360)%360 : -1;
+  const cd = h>=0 ? card(h) : '--', dg = h>=0 ? h+'°' : '';
+  $('s1card').textContent=cd; $('s1deg').textContent=dg;
+  $('s2card').textContent=cd; $('s2deg').textContent=dg;
+
+  $('s1odo').textContent = $('s2odo').textContent = (s.odo>=0?s.odo.toFixed(1):'--');
+  $('s1clk').textContent = $('s2clk').textContent = s.clock;
+  $('s1pi').classList.toggle('on', s.piOn!==false); $('s1nan').classList.toggle('on', s.nanoOn!==false);
+  $('s1pw').textContent = (s.power>=0?Math.round(s.power):'--')+'W';
+}
+
+const F = o => Object.assign({speed:0,rpm:0,gear:'N',fuel:44,bat:100,volt:12.4,odo:38813.6,heading:312,power:9,piOn:true,nanoOn:true,clock:'22:16'}, o);
+const SEQ = [
+  F({rpm:5200,gear:'N'}), F({rpm:7000,gear:'N'}), F({rpm:4400,gear:'N'}), F({rpm:900,gear:'N'}),
+  F({speed:6,rpm:1500,gear:'1',heading:310}), F({speed:18,rpm:2400,gear:'1',heading:308}),
+  F({speed:26,rpm:3400,gear:'1',heading:306}), F({speed:34,rpm:4400,gear:'2',heading:304,gearFlash:true}),
+  F({speed:52,rpm:5200,gear:'2',heading:302}), F({speed:68,rpm:6100,gear:'3',heading:300,gearFlash:true}),
+  F({speed:88,rpm:6800,gear:'3',heading:296}), F({speed:104,rpm:7050,gear:'3',heading:292}),
+  F({speed:112,rpm:7080,gear:'3',heading:290}), F({speed:120,rpm:4400,gear:'4',heading:288,gearFlash:true}),
+  F({speed:128,rpm:4700,gear:'4',heading:286}), F({speed:136,rpm:5300,gear:'4',heading:284}),
+  F({speed:144,rpm:5900,gear:'4',heading:282}), F({speed:150,rpm:6500,gear:'5',heading:280,gearFlash:true}),
+  F({speed:152,rpm:4900,gear:'5',heading:278}), F({speed:148,rpm:4600,gear:'5',heading:276}),
+  F({speed:138,rpm:4200,gear:'5',heading:274}), F({speed:120,rpm:3600,gear:'4',heading:272,gearFlash:true}),
+  F({speed:96,rpm:2900,gear:'3',heading:270,gearFlash:true}), F({speed:64,rpm:2200,gear:'2',heading:268,gearFlash:true})
+];
+
+const q = new URLSearchParams(location.search);
+if (q.get('v')) document.body.dataset.v = q.get('v');
+if (q.get('f')){
+  const map = {rajdhani:'Rajdhani', saira:"'SairaCond'", chakra:"'ChakraPetch'", barlow:"'BarlowSC'"};
+  const f = map[q.get('f')] || 'Rajdhani';
+  document.documentElement.style.setProperty('--num', f + ',system-ui,sans-serif');
+}
+if (q.has('fuel')) SEQ.forEach(s => s.fuel = 9);
+if (q.has('frame')){
+  document.body.classList.add('no-anim');
+  applyState(SEQ[((+q.get('frame')%SEQ.length)+SEQ.length)%SEQ.length]);
+} else {
+  let i=0; applyState(SEQ[0]);
+  setInterval(()=>{ i=(i+1)%SEQ.length; applyState(SEQ[i]); }, 250);
+  setInterval(()=>{ const n=new Date(), t=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+    document.querySelectorAll('.b-clock').forEach(e=>e.textContent=t); }, 5000);
+}
+</script>
+</body>
+</html>

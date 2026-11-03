@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HUD 字体样张</title>
+<style>
+  @font-face{font-family:'Odibee';src:url('OdibeeSans-Regular.ttf') format('truetype')}
+  @font-face{font-family:'Rajdhani';src:url('fonts/Rajdhani-Bold.ttf') format('truetype')}
+  @font-face{font-family:'SairaCond';src:url('fonts/SairaCondensed-Bold.ttf') format('truetype')}
+  @font-face{font-family:'BarlowSC';src:url('fonts/BarlowSemiCondensed-Bold.ttf') format('truetype')}
+  @font-face{font-family:'ChakraPetch';src:url('fonts/ChakraPetch-Bold.ttf') format('truetype')}
+  @font-face{font-family:'Titillium';src:url('fonts/TitilliumWeb-Bold.ttf') format('truetype')}
+  @font-face{font-family:'Quantico';src:url('fonts/Quantico-Bold.ttf') format('truetype')}
+  @font-face{font-family:'Michroma';src:url('fonts/Michroma-Regular.ttf') format('truetype')}
+  @font-face{font-family:'ShareTechMono';src:url('fonts/ShareTechMono-Regular.ttf') format('truetype')}
+  @font-face{font-family:'Electrolize';src:url('fonts/Electrolize-Regular.ttf') format('truetype')}
+  @font-face{font-family:'BaiJamjuree';src:url('fonts/BaiJamjuree-Bold.ttf') format('truetype')}
+  @font-face{font-family:'DSEG7';src:url('fonts/DSEG7Classic-Bold.ttf') format('truetype')}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:960px;background:#000;color:#fff}
+  .grid{display:grid;grid-template-columns:480px 480px}
+  .tile{width:480px;height:222px;padding:8px 12px 0;border-bottom:1px solid #16232e;border-right:1px solid #16232e;position:relative}
+  .cap{font-family:system-ui,sans-serif;font-weight:700;font-size:14px;color:#7f93a3;letter-spacing:.04em;height:20px}
+  .cap b{color:#e6eef5}
+  .r1{display:flex;align-items:flex-end;gap:8px;height:104px}
+  .big{font-size:88px;line-height:.86;color:#fff}
+  .mid{font-size:44px;line-height:1;color:#e6eef5}
+  .unit{font-size:16px;color:#8ea0b0;font-family:system-ui,sans-serif;font-weight:800;letter-spacing:.08em}
+  .r2{display:flex;gap:14px;align-items:baseline;font-size:28px;color:#c9d6e1;height:36px}
+  .r2 .w{color:#fff}
+  .r3{font-size:20px;color:#8ea0b0;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="grid" id="g"></div>
+<script>
+const FONTS = [
+  ['Odibee',      'Odibee Sans',      '现用字体（单字重、窄体、笔画偏细）'],
+  ['Rajdhani',    'Rajdhani Bold',    '方切角 / 赛道科技感，字面紧、笔画厚'],
+  ['SairaCond',   'Saira Condensed Bold', '赛道压缩体，x 高极大，远距可读'],
+  ['BarlowSC',    'Barlow Semi Condensed Bold', '中性极简，最"干净"的一档'],
+  ['ChakraPetch', 'Chakra Petch Bold', '切角科技，仪表盘味最足'],
+  ['Titillium',   'Titillium Web Bold', '工程/人文，字腔开放'],
+  ['Quantico',    'Quantico Bold',    '军规方块，笔画均匀'],
+  ['Michroma',    'Michroma',         '宽几何科技（字面宽，占位大）'],
+  ['ShareTechMono','Share Tech Mono',  '等宽技术流，偏细'],
+  ['Electrolize', 'Electrolize',      '电子感，偏细'],
+  ['BaiJamjuree', 'Bai Jamjuree Bold','几何科技，圆角方框'],
+  ['DSEG7',       'DSEG7 Classic Bold','七段数码管（纯仪表 DNA）']
+];
+const g = document.getElementById('g');
+g.innerHTML = FONTS.map(([fam, name, desc]) => `
+  <div class="tile" style="font-family:'${fam}',sans-serif">
+    <div class="cap"><b>${name}</b> — ${desc}</div>
+    <div class="r1">
+      <span class="big">128</span>
+      <span class="unit">KM/H</span>
+      <span class="mid">4700</span>
+      <span class="unit">RPM</span>
+    </div>
+    <div class="r2">
+      <span class="w">38813.6</span><span>KM</span><span class="w">22:16</span><span>NW 312°</span><span class="w">44%</span>
+    </div>
+    <div class="r3">0123456789 780 收车 → 换挡 · 西南</div>
+  </div>`).join('');
+</script>
+</body>
+</html>

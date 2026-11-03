@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=480, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HUD Sport Prototype (v6)</title>
+<style>
+@font-face{font-family:'Odibee';src:url('OdibeeSans-Regular.ttf') format('truetype');font-display:block}
+:root{
+  --bg:#000;
+  --dim:#9db0bf;      /* secondary text — large + heavy enough to survive the combiner */
+  --dim2:#27374a;     /* unlit segment / idle track */
+  --track:#0e1a24;
+  --line:#1b2b38;
+  --acc:#FF5722; --amber:#FFB300; --green:#4CAF50; --blue:#3399ff;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:480px;height:240px;overflow:hidden;background:var(--bg)}
+body{position:relative;font-family:'Odibee',sans-serif}
+.v{position:absolute;left:0;top:0;width:480px;height:240px;display:none;overflow:hidden}
+body[data-v="s1"] .v.s1{display:block}
+body[data-v="s2"] .v.s2{display:block}
+body.no-anim *{transition:none!important;animation:none!important}
+.L{font-family:system-ui,'Noto Sans',sans-serif;font-weight:800;color:var(--dim);letter-spacing:.05em}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--dim2);display:inline-block;transition:background .3s,box-shadow .3s}
+.dot.pi.on{background:var(--blue);box-shadow:0 0 6px rgba(51,153,255,.95)}
+.dot.nano.on{background:var(--green);box-shadow:0 0 6px rgba(76,175,80,.95)}
+
+/* ── rolling digits ── */
+.digits{display:flex;align-items:flex-end}
+.digit{position:relative;height:1em;overflow:hidden;width:.5em}
+.dstrip{display:flex;flex-direction:column;will-change:transform}
+.dstrip span{height:1em;line-height:1;display:block}
+.track{background:var(--track);overflow:hidden;border-radius:2px}
+.fill{height:100%;width:0%;transition:width .18s ease-out}
+.fill.fue{background:var(--amber)}
+.fill.bat{background:var(--blue)}
+
+/* ── shift-light strip (shared) ── */
+.shift{width:340px;flex:none;display:flex;gap:4px}
+.seg{flex:1;height:16px;background:var(--dim2);border-radius:3px;transition:background .09s linear,box-shadow .09s linear}
+.seg.g{background:var(--green);box-shadow:0 0 8px rgba(76,175,80,.8)}
+.seg.a{background:var(--amber);box-shadow:0 0 8px rgba(255,179,0,.8)}
+.seg.r{background:var(--acc);box-shadow:0 0 9px rgba(255,87,34,.9)}
+.shift.hot .seg.a,.shift.hot .seg.r{background:#fff;box-shadow:0 0 15px #fff}
+.shift.hot{animation:strobe .09s steps(1,end) infinite alternate}
+@keyframes strobe{from{filter:brightness(1)}to{filter:brightness(1.9)}}
+.hdg{flex:1;text-align:right;line-height:1.05}
+.hdg b{font-size:24px;color:var(--acc);letter-spacing:.03em}
+.hdg span{font-size:17px;color:var(--dim);margin-left:5px}
+
+/* ══════════ S1 · GT3 DDU ══════════ */
+.s1 .row-top{position:absolute;left:8px;top:0;width:464px;height:32px;display:flex;align-items:center;gap:8px}
+.s1 .spd{position:absolute;left:8px;top:32px;width:170px;height:176px;display:flex;flex-direction:column;justify-content:flex-end;align-items:flex-start}
+.s1 .spd-l{font-size:18px;color:var(--dim);letter-spacing:.16em;margin-left:5px;margin-bottom:2px;font-family:system-ui,sans-serif;font-weight:800}
+.s1 .spd .digits{font-size:100px;color:#fff;filter:drop-shadow(0 0 10px rgba(255,255,255,.35))}
+.s1 .tach{position:absolute;left:180px;top:30px;width:162px;height:176px}
+.s1 .tach svg{width:162px;height:176px;display:block}
+.s1 .gear{position:absolute;left:50%;top:44px;transform:translateX(-50%);text-align:center;line-height:.95}
+.s1 .gear b{font-size:50px;color:#fff}
+.s1 .gear.flash b{color:var(--acc);text-shadow:0 0 18px var(--acc);animation:gflash .16s ease-out}
+@keyframes gflash{0%{transform:scale(1.14);color:#fff}100%{transform:scale(1)}}
+.s1 .rpm-t{position:absolute;left:50%;top:106px;transform:translateX(-50%);font-size:26px;color:#dde7ef;line-height:1;white-space:nowrap}
+.s1 .rpm-t i{font-style:normal;font-size:14px;color:var(--dim);margin-left:5px;font-family:system-ui,sans-serif;font-weight:800}
+.s1 .stack{position:absolute;right:8px;top:38px;width:126px;display:flex;flex-direction:column;gap:11px}
+.s1 .st .h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
+.s1 .st .h i{font-style:normal;font-size:13px;font-family:system-ui,sans-serif;font-weight:800;color:var(--dim);letter-spacing:.08em}
+.s1 .st .h em{font-style:normal;font-size:19px;color:#fff}
+.s1 .st .track{height:12px}
+.s1 .st.volt .h em{color:#7fd3ff}
+.s1 .st.pulse .h em,.s1 .st.pulse .h i{color:var(--acc)}
+.s1 .st.pulse .fill.fue{background:var(--acc);animation:fuelpulse 1.2s ease-in-out infinite}
+@keyframes fuelpulse{0%,100%{opacity:1}50%{opacity:.2}}
+.s1 .row-bot{position:absolute;left:0;bottom:0;width:480px;height:34px;display:flex;align-items:center;padding:0 8px;gap:8px;border-top:2px solid var(--line)}
+.s1 .b-odo{display:flex;align-items:baseline;gap:5px}
+.s1 .b-odo b{font-size:24px;color:#fff;letter-spacing:.02em}
+.s1 .b-item{display:flex;align-items:baseline;gap:4px}
+.s1 .b-item b{font-size:19px;color:#e2ecf4}
+.s1 .sys{display:flex;align-items:center;gap:5px;margin-left:auto}
+.s1 .sys-t{font-size:16px;color:#7fd3ff}
+.s1 .b-clock{font-size:24px;color:#fff;letter-spacing:.04em}
+
+/* ══════════ S2 · Speed priority ══════════ */
+.s2 .row-top{position:absolute;left:8px;top:0;width:464px;height:30px;display:flex;align-items:center;gap:8px}
+.s2 .gear{position:absolute;left:8px;top:66px;width:88px;text-align:center;line-height:.9}
+.s2 .gear b{font-size:62px;color:#fff}
+.s2 .gear.flash b{color:var(--acc);text-shadow:0 0 18px var(--acc)}
+.s2 .gear .g-l{display:block;font-size:12px;color:var(--dim);margin-top:5px;font-family:system-ui,sans-serif;font-weight:800;letter-spacing:.1em}
+.s2 .vlt{position:absolute;left:8px;top:160px;width:88px;text-align:center;font-size:17px;color:#7fd3ff}
+.s2 .spd{position:absolute;left:96px;top:28px;width:220px;text-align:center}
+.s2 .spd .digits{font-size:104px;color:#fff;justify-content:center;filter:drop-shadow(0 0 11px rgba(255,255,255,.38))}
+.s2 .spd-l{font-size:17px;color:var(--dim);letter-spacing:.22em;font-family:system-ui,sans-serif;font-weight:800}
+.s2 .rpm-n{position:absolute;right:8px;top:44px;width:130px;text-align:right;line-height:1}
+.s2 .rpm-n b{font-size:44px;color:#fff}
+.s2 .rpm-n i{font-style:normal;font-size:14px;color:var(--dim);margin-left:5px;font-family:system-ui,sans-serif;font-weight:800}
+.s2 .rpm-bar{position:absolute;left:8px;width:464px;top:172px;display:flex;gap:3px}
+.s2 .rseg{flex:1;height:18px;background:var(--dim2);border-radius:2px;transition:background .09s linear}
+.s2 .rseg.g{background:var(--green)} .s2 .rseg.a{background:var(--amber)} .s2 .rseg.r{background:var(--acc)}
+.s2 .rpm-bar.on .rseg.r{background:#fff;box-shadow:0 0 12px #fff}
+.s2 .row-bot{position:absolute;left:0;bottom:0;width:480px;height:48px;display:flex;align-items:center;padding:0 8px;gap:10px;border-top:2px solid var(--line)}
+.s2 .en{width:150px}
+.s2 .en .h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+.s2 .en .h i{font-style:normal;font-size:13px;font-family:system-ui,sans-serif;font-weight:800;color:var(--dim)}
+.s2 .en .h em{font-style:normal;font-size:17px;color:#fff}
+.s2 .en .track{height:11px}
+.s2 .en.pulse .h i,.s2 .en.pulse .h em{color:var(--acc)}
+.s2 .en.pulse .fill.fue{background:var(--acc)}
+.s2 .b-odo{display:flex;align-items:baseline;gap:5px}
+.s2 .b-odo b{font-size:23px;color:#fff}
+.s2 .sys{display:flex;align-items:center;gap:5px;margin-left:auto}
+.s2 .b-clock{font-size:23px;color:#fff}
+</style>
+</head>
+<body data-v="s1">
+
+<!-- ══════════════ S1 · GT3 DDU ══════════════ -->
+<div class="v s1">
+  <div class="row-top">
+    <div class="shift" id="s1shift"></div>
+    <div class="hdg"><b id="s1card">NNW</b><span id="s1deg">337°</span></div>
+  </div>
+
+  <div class="spd">
+    <div class="spd-l">KM/H</div>
+    <div class="digits" id="s1spd"></div>
+  </div>
+
+  <div class="tach">
+    <svg viewBox="0 0 162 176"><g id="s1segs"></g></svg>
+    <div class="gear" id="s1gear"><b>N</b></div>
+    <div class="rpm-t" id="s1rpmn">0<i>RPM</i></div>
+  </div>
+
+  <div class="stack">
+    <div class="st" id="s1fueBox">
+      <div class="h"><i>FUEL</i><em id="s1fuev">--%</em></div>
+      <div class="track"><div class="fill fue" id="s1fuef"></div></div>
+    </div>
+    <div class="st" id="s1batBox">
+      <div class="h"><i>BAT</i><em id="s1batv">--%</em></div>
+      <div class="track"><div class="fill bat" id="s1batf"></div></div>
+    </div>
+    <div class="st volt">
+      <div class="h"><i>VOLT</i><em id="s1voltv">--V</em></div>
+    </div>
+  </div>
+
+  <div class="row-bot">
+    <span class="b-odo"><span class="L" style="font-size:13px">ODO</span><b id="s1odo">--</b><span class="L" style="font-size:12px">KM</span></span>
+    <span class="b-item"><span class="L" style="font-size:12px">SRV</span><b id="s1srv">--</b></span>
+    <span class="b-item"><span class="L" style="font-size:12px">EH</span><b id="s1eh">--</b></span>
+    <span class="sys"><i class="dot pi on" id="s1pi"></i><i class="dot nano on" id="s1nan"></i><span class="sys-t" id="s1pw">9W</span></span>
+    <span class="b-clock" id="s1clk">--:--</span>
+  </div>
+</div>
+
+<!-- ══════════════ S2 · Speed priority ══════════════ -->
+<div class="v s2">
+  <div class="row-top">
+    <div class="shift" id="s2shift"></div>
+    <div class="hdg"><b id="s2card">NNW</b><span id="s2deg">337°</span></div>
+  </div>
+
+  <div class="gear" id="s2gear"><b>N</b><span class="g-l">GEAR</span></div>
+  <div class="vlt" id="s2voltv">--V</div>
+
+  <div class="spd">
+    <div class="spd-l">KM/H</div>
+    <div class="digits" id="s2spd"></div>
+  </div>
+
+  <div class="rpm-n"><b id="s2rpmn">0</b><i>RPM</i></div>
+
+  <div class="rpm-bar" id="s2rbar"></div>
+
+  <div class="row-bot">
+    <span class="b-odo"><span class="L" style="font-size:13px">ODO</span><b id="s2odo">--</b><span class="L" style="font-size:12px">KM</span></span>
+    <div class="en" id="s2fueBox">
+      <div class="h"><i>FUEL</i><em id="s2fuev">--%</em></div>
+      <div class="track"><div class="fill fue" id="s2fuef"></div></div>
+    </div>
+    <div class="en" id="s2batBox">
+      <div class="h"><i>BAT</i><em id="s2batv">--%</em></div>
+      <div class="track"><div class="fill bat" id="s2batf"></div></div>
+    </div>
+    <span class="sys"><i class="dot pi on" id="s2pi"></i><i class="dot nano on" id="s2nan"></i></span>
+    <span class="b-clock" id="s2clk">--:--</span>
+  </div>
+</div>
+
+<script>
+const RPM_MAX = 7000;            // full scale (existing APK convention)
+const SEG = 24;                  // tach arc segments
+const SHIFT_N = 15;              // shift-light blocks
+const A0 = 135, A1 = 405;        // 270° sweep, opening faces down (GT3 DDU style)
+
+const $ = id => document.getElementById(id);
+
+function buildShift(el){
+  el.innerHTML = '';
+  for (let i = 0; i < SHIFT_N; i++){ const d = document.createElement('div'); d.className = 'seg'; el.appendChild(d); }
+}
+buildShift($('s1shift')); buildShift($('s2shift'));
+
+const CX = 81, CY = 88, R = 66;
+const pt = a => [CX + R * Math.cos(a * Math.PI / 180), CY + R * Math.sin(a * Math.PI / 180)];
+(function buildArc(){
+  const g = $('s1segs'), step = (A1 - A0) / SEG, gap = 2.6;
+  const [bx0, by0] = pt(A0), [bx1, by1] = pt(A1);
+  g.insertAdjacentHTML('beforeend',
+    `<path d="M${bx0} ${by0} A${R} ${R} 0 1 1 ${bx1} ${by1}" fill="none" stroke="#16242f" stroke-width="13" stroke-linecap="round"/>`);
+  for (let i = 0; i < SEG; i++){
+    const [x0, y0] = pt(A0 + i * step + gap / 2), [x1, y1] = pt(A0 + (i + 1) * step - gap / 2);
+    g.insertAdjacentHTML('beforeend',
+      `<path id="s1seg${i}" d="M${x0} ${y0} A${R} ${R} 0 0 1 ${x1} ${y1}" fill="none" stroke="#1e2f3d" stroke-width="13" stroke-linecap="butt"/>`);
+  }
+})();
+
+(function buildBar(){
+  const el = $('s2rbar');
+  for (let i = 0; i < SEG; i++){ const d = document.createElement('div'); d.className = 'rseg'; el.appendChild(d); }
+})();
+
+const zone = (i, n) => i / n < .60 ? 'g' : i / n < .84 ? 'a' : 'r';
+const ARC_ZONE = i => i < 14 ? '#4CAF50' : i < 20 ? '#FFB300' : '#FF5722';
+
+function buildDigits(host, n){
+  host.innerHTML = '';
+  const cols = [];
+  for (let c = 0; c < n; c++){
+    const col = document.createElement('div'); col.className = 'digit';
+    const strip = document.createElement('div'); strip.className = 'dstrip';
+    // cell 0 = blank (leading zero suppression), cells 1..10 = 0..9, cell 11 = 0 (roll-through wrap)
+    ['', '0','1','2','3','4','5','6','7','8','9','0'].forEach(t => {
+      const s = document.createElement('span'); s.textContent = t; strip.appendChild(s);
+    });
+    col.appendChild(strip); host.appendChild(col);
+    cols.push({ strip, pos: 0 });
+  }
+  return cols;
+}
+function setDigits(cols, value){
+  const s = String(Math.round(value));
+  for (let i = 0; i < cols.length; i++){
+    const ch = s[s.length - cols.length + i];
+    const cur = cols[i];
+    let pos = (ch === undefined || isNaN(+ch)) ? 0 : +ch + 1;
+    if (cur.pos === 10 && pos === 1) pos = 11;      // roll forward through 9 -> 0
+    if (cur.pos === 11) cur.pos = 1;
+    cur.strip.style.transform = `translateY(${-pos}em)`;
+    cur.pos = pos;
+    if (pos === 11){
+      setTimeout(() => {
+        cur.strip.style.transition = 'none';
+        cur.strip.style.transform = 'translateY(-1em)';
+        setTimeout(() => { cur.strip.style.transition = ''; }, 40);
+        cur.pos = 1;
+      }, 300);
+    }
+  }
+}
+const colsS1 = buildDigits($('s1spd'), 3);
+const colsS2 = buildDigits($('s2spd'), 3);
+
+const CARD = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const card = h => CARD[Math.round(((h % 360) + 360) % 360 / 22.5) % 16];
+function calcGear(speed, rpm){
+  if (speed < 1 || rpm < 100) return 'N';
+  const ra = speed / (rpm / 1000), tt = [0,12.5,13.8,16.9,21.6,28.7,41.4,55.5,67.2,999];
+  for (let g = 1; g <= 9; g++) if (ra < tt[g]) return String(g);
+  return '9';
+}
+
+function applyState(s){
+  const rpmPct = Math.max(0, Math.min(1, (s.rpm || 0) / RPM_MAX));
+  const lit = Math.round(rpmPct * SEG), litS = Math.round(rpmPct * SHIFT_N);
+  const hot = rpmPct >= .92;
+
+  [].forEach.call($('s1shift').children, (d, i) => { d.className = 'seg' + (i < litS ? ' ' + zone(i, SHIFT_N) : ''); });
+  $('s1shift').classList.toggle('hot', hot);
+  for (let i = 0; i < SEG; i++) $('s1seg' + i).setAttribute('stroke', i < lit ? ARC_ZONE(i) : '#1e2f3d');
+  [].forEach.call($('s2rbar').children, (d, i) => { d.className = 'rseg' + (i < lit ? ' ' + zone(i, SEG) : ''); });
+  $('s2rbar').classList.toggle('on', hot);
+
+  const spd = s.speed >= 0 ? s.speed : 0;
+  setDigits(colsS1, spd); setDigits(colsS2, spd);
+
+  const g = s.gear || calcGear(spd, s.rpm);
+  $('s1gear').querySelector('b').textContent = g;
+  $('s2gear').querySelector('b').textContent = g;
+  $('s1gear').classList.toggle('flash', !!s.gearFlash);
+  $('s2gear').classList.toggle('flash', !!s.gearFlash);
+
+  $('s1rpmn').innerHTML = (s.rpm >= 0 ? Math.round(s.rpm) : '--') + '<i>RPM</i>';
+  $('s2rpmn').textContent = s.rpm >= 0 ? Math.round(s.rpm) : '--';
+
+  const fue = s.fuel, bat = s.bat, low = fue >= 0 && fue < 15;
+  $('s1fuef').style.width = fue >= 0 ? fue + '%' : '0%';
+  $('s1batf').style.width = bat >= 0 ? bat + '%' : '0%';
+  $('s2fuef').style.width = $('s1fuef').style.width;
+  $('s2batf').style.width = $('s1batf').style.width;
+  $('s1fuev').textContent = fue >= 0 ? Math.round(fue) + '%' : '--%';
+  $('s1batv').textContent = bat >= 0 ? Math.round(bat) + '%' : '--%';
+  $('s2fuev').textContent = $('s1fuev').textContent;
+  $('s2batv').textContent = $('s1batv').textContent;
+  $('s1fueBox').classList.toggle('pulse', low);
+  $('s2fueBox').classList.toggle('pulse', low);
+  $('s1voltv').textContent = s.volt >= 0 ? s.volt.toFixed(1) + 'V' : '--V';
+  $('s2voltv').textContent = s.volt >= 0 ? s.volt.toFixed(1) + 'V' : '--V';
+
+  const h = s.heading >= 0 ? ((Math.round(s.heading) % 360) + 360) % 360 : -1;
+  $('s1card').textContent = h >= 0 ? card(h) : '--';
+  $('s1deg').textContent = h >= 0 ? h + '°' : '';
+  $('s2card').textContent = $('s1card').textContent;
+  $('s2deg').textContent = $('s1deg').textContent;
+
+  $('s1odo').textContent = s.odo >= 0 ? s.odo.toFixed(1) : '--';
+  $('s2odo').textContent = $('s1odo').textContent;
+  $('s1srv').textContent = s.srv >= 0 ? s.srv : '--';
+  $('s1eh').textContent = s.eh >= 0 ? s.eh.toFixed(1) + 'h' : '--';
+  $('s1clk').textContent = s.clock; $('s2clk').textContent = s.clock;
+
+  $('s1pi').classList.toggle('on', s.piOn !== false);
+  $('s1nan').classList.toggle('on', s.nanoOn !== false);
+  $('s2pi').classList.toggle('on', s.piOn !== false);
+  $('s2nan').classList.toggle('on', s.nanoOn !== false);
+  $('s1pw').textContent = (s.power >= 0 ? Math.round(s.power) : '--') + 'W';
+}
+
+/* scripted drive sequence — 24 states */
+const F = o => Object.assign({speed:0,rpm:0,gear:'N',fuel:44,bat:100,volt:12.4,odo:38813.6,srv:323,eh:10.8,heading:337,power:9,piOn:true,nanoOn:true,clock:'22:16'}, o);
+const SEQ = [
+  F({rpm:5200,gear:'N',heading:337}),
+  F({rpm:7000,gear:'N',heading:337}),
+  F({rpm:4400,gear:'N',heading:337}),
+  F({rpm:900,gear:'N',heading:337}),
+  F({speed:6,rpm:1500,gear:'1',heading:335}),
+  F({speed:18,rpm:2400,gear:'1',heading:334}),
+  F({speed:26,rpm:3400,gear:'1',heading:332}),
+  F({speed:34,rpm:4400,gear:'2',heading:330,gearFlash:true}),
+  F({speed:52,rpm:5200,gear:'2',heading:328}),
+  F({speed:68,rpm:6100,gear:'3',heading:326,gearFlash:true}),
+  F({speed:88,rpm:6800,gear:'3',heading:322}),
+  F({speed:104,rpm:7050,gear:'3',heading:318}),
+  F({speed:112,rpm:7080,gear:'3',heading:316}),
+  F({speed:120,rpm:4400,gear:'4',heading:314,gearFlash:true}),
+  F({speed:128,rpm:4700,gear:'4',heading:312}),
+  F({speed:136,rpm:5300,gear:'4',heading:310}),
+  F({speed:144,rpm:5900,gear:'4',heading:308}),
+  F({speed:150,rpm:6500,gear:'5',heading:305,gearFlash:true}),
+  F({speed:152,rpm:4900,gear:'5',heading:303}),
+  F({speed:148,rpm:4600,gear:'5',heading:301}),
+  F({speed:138,rpm:4200,gear:'5',heading:299}),
+  F({speed:120,rpm:3600,gear:'4',heading:297,gearFlash:true}),
+  F({speed:96,rpm:2900,gear:'3',heading:295,gearFlash:true}),
+  F({speed:64,rpm:2200,gear:'2',heading:294,gearFlash:true})
+];
+
+const q = new URLSearchParams(location.search);
+if (q.get('v')) document.body.dataset.v = q.get('v');
+if (q.has('fuel')) SEQ.forEach(s => s.fuel = 9);
+
+if (q.has('frame')){
+  document.body.classList.add('no-anim');
+  applyState(SEQ[((+q.get('frame') % SEQ.length) + SEQ.length) % SEQ.length]);
+} else {
+  let i = 0; applyState(SEQ[0]);
+  setInterval(() => { i = (i + 1) % SEQ.length; applyState(SEQ[i]); }, 250);
+  setInterval(() => {
+    const n = new Date(), t = String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
+    document.querySelectorAll('.b-clock').forEach(e => e.textContent = t);
+  }, 5000);
+}
+</script>
+</body>
+</html>

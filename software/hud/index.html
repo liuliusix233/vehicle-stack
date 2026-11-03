@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HUD 960×240</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#000}
+  body{min-height:100vh;background:#000;color:#7d949a;
+    font-family:"Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    display:flex;flex-direction:column;align-items:center;padding:24px 20px 36px}
+  .wrap{width:100%;max-width:1240px}
+  .labelrow{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;
+    font-size:10px;letter-spacing:.2em;color:#43565b}
+  .labelrow b{color:#cfe9e4;font-weight:600;letter-spacing:.12em;font-size:11px}
+  #blackout{position:fixed;inset:0;background:#000;z-index:99999;display:none}
+  @font-face{font-family:'HUDNum';src:url('fonts/hud-num.woff2') format('woff2');font-weight:700;font-display:block}
+  @font-face{font-family:'HUDCJK';src:url('fonts/hud-cjk.woff2') format('woff2');font-weight:700;font-display:block}
+  .panel{position:relative;width:100%;aspect-ratio:960/240;border-radius:10px;overflow:hidden;
+    background:#000;box-shadow:0 0 0 1px rgba(80,200,190,.16)}
+  .panel canvas{display:block;width:100%;height:100%;position:relative;z-index:2}
+  #mapclip{position:absolute;left:33.3333%;top:0;width:33.3333%;height:100%;overflow:hidden;z-index:1;background:#000;display:none}
+  body.map-on #mapclip{display:block}
+  #mapclip::after{content:'';position:absolute;inset:0;background:rgba(0,0,0,.5);pointer-events:none}
+  .panel::after{content:'';position:absolute;left:33.3333%;top:0;width:33.3333%;height:100%;background:rgba(0,0,0,.55);pointer-events:none;z-index:3}
+  #amap{position:absolute;left:-35%;top:-18.33%;width:170%;height:170%;transform-origin:50% 50%;will-change:transform;
+    filter:var(--mapfx,none)}
+  .controls{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+    gap:12px 20px;padding:14px 18px;border-radius:10px;background:#040707;border:1px solid rgba(70,160,155,.14)}
+  .ctl{display:flex;flex-direction:column;gap:6px}
+  .ctl .top{display:flex;justify-content:space-between;font-size:11px;color:#61797f}
+  .ctl .top i{font-style:normal;color:#b9e2da;font-variant-numeric:tabular-nums}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:3px;background:rgba(110,190,185,.18);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#25e3c9;box-shadow:0 0 9px rgba(37,227,201,.8);cursor:pointer}
+  .toggles{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;
+    border:1px solid rgba(110,190,185,.2);background:#070d0e;font-size:12px;color:#9ab4b8;cursor:pointer;user-select:none}
+  .chip.on{background:rgba(37,227,201,.12);border-color:rgba(37,227,201,.6);color:#d6fff8}
+  .chip .dot{width:6px;height:6px;border-radius:50%;background:#33474b}
+  .chip.on .dot{background:#25e3c9;box-shadow:0 0 7px #25e3c9}
+  .hint{margin-top:12px;font-size:11px;color:#3f5459;line-height:1.9}
+  .hint code{color:#8fd1c8;background:rgba(37,227,201,.07);padding:1px 6px;border-radius:4px}
+  body.bare{padding:0;display:block}
+  body.bare .controls,body.bare .labelrow,body.bare .hint{display:none}
+  body.bare .wrap{max-width:none}
+  body.bare .panel{border-radius:0;box-shadow:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="labelrow"><b>HUD 测试台 · 960 × 240</b><span id="srcTag">AMAP VECTOR</span></div>
+  <div class="panel" id="panel"><div id="mapclip"><div id="amap"></div></div><canvas id="hud"></canvas></div>
+  <div id="blackout"></div>
+
+  <div class="controls">
+    <div class="ctl"><div class="top"><span>车速</span><i id="vSpeed">48</i></div>
+      <input type="range" id="sSpeed" min="0" max="180" step="1" value="48"></div>
+    <div class="ctl"><div class="top"><span>航向</span><i id="vHead">12°</i></div>
+      <input type="range" id="sHead" min="0" max="359" step="1" value="12"></div>
+    <div class="ctl"><div class="top"><span>转向距离</span><i id="vDist">300 m</i></div>
+      <input type="range" id="sDist" min="0" max="5000" step="10" value="300"></div>
+      <div class="ctl" style="grid-column:1/-1"><div class="top"><span>导航动作（测试图标）</span><i id="vManeuver">右转</i></div>
+        <div class="toggles" id="mvRow"></div></div>
+    <div class="ctl"><div class="top"><span>模式</span><i id="vFps">–</i></div>
+      <div class="toggles">
+        <div class="chip on" id="cAuto"><span class="dot"></span>巡航</div>
+        <div class="chip" id="cBare"><span class="dot"></span>纯屏</div>
+      </div></div>
+  </div>
+  <div class="hint">键盘 ↑↓ 车速 · ←→ 航向 · A 巡航 · F 全屏 ·
+    <code>HUD.feed({speed,heading,gear,lat,lon,nav:{distance,road,remain,eta}})</code></div>
+</div>
+
+<script>
+(function () {
+  const W = 960, H = 240, ZW = 320;
+  const MAP_X = 320, MAP_W = 320, MAP_CX = 480, MAP_CY = 160;   // 车标下移三分之一，前方留出视野
+  const FS1 = 128, FS2 = 22, FS3 = 11;
+  const FONT = 'HUDNum,"DIN Alternate","Bahnschrift","Roboto Condensed",HUDCJK,"Noto Sans CJK SC","Droid Sans Fallback","PingFang SC","Microsoft YaHei",sans-serif';
+  const T1 = '700 ' + FS1 + 'px ' + FONT;
+  const T2 = '600 ' + FS2 + 'px ' + FONT;
+  const T3 = '500 ' + FS3 + 'px ' + FONT;
+
+  const cv = document.getElementById('hud');
+  const ctx = cv.getContext('2d');
+  function fit() {
+    const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', fit); fit();
+
+  const QS = new URLSearchParams(location.search);
+  const MAP_ON = QS.get('map') === '1';   // 默认关闭地图，中间留黑；?map=1 可恢复
+  document.body.classList.toggle('map-on', MAP_ON);
+  const AMAP_KEY = QS.get('key') || '7e9f375c10879988cb30ba64e5bba013';
+  const AMAP_SEC = QS.get('sec') || '8b8868c656ef49cd30419695ef21cea0';
+  const AMAP_STYLE = QS.get('style') || 'amap://styles/3debefdf1b496159bccef2f2a1dc77a8';
+  const MAP_FX = QS.get('fx') || 'invert(1) saturate(0) brightness(11) contrast(2.1)';
+  document.documentElement.style.setProperty('--mapfx', MAP_FX);
+  let amap = null, vectorMode = false, lastZoom = 16;
+
+  const state = {
+    speed: null, heading: 0, gear: '—', auto: false, gps: null, odo: 0, fps: 0, dataLive: false,
+    nav: { distance: null, road: '', action: '', remain: null, eta: '', navi: false }, countdown: null, maneuver: null, navLive: false,
+    gearLive: false, lightLive: false, lightColor: null, route: null
+  };
+  const car = { x: 0, z: 0 };
+  if (QS.get('speed') !== null) { state.speed = +QS.get('speed'); state.auto = false; }
+  if (QS.get('head') !== null) { state.heading = +QS.get('head'); state.auto = false; }
+  if (QS.get('m')) state.maneuver = QS.get('m');
+  if (QS.get('dist')) state.nav.distance = +QS.get('dist');
+  if (QS.get('road')) state.nav.road = QS.get('road');
+  let t0 = performance.now(), last = t0;
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const spanFor = sp => 500 + 2500 * clamp((sp||0)/120, 0, 1);   // 500m → 3km
+
+  const LAT0 = 31.5896, LON0 = 120.3607;
+  const MPD_LAT = 111320, MPD_LON = 111320 * Math.cos(LAT0*Math.PI/180);
+  const carLon = () => (state.gps ? state.gps.lon : LON0 + car.x/MPD_LON);
+  const carLat = () => (state.gps ? state.gps.lat : LAT0 + car.z/MPD_LAT);
+
+  const PI = Math.PI, AXIS = 6378245.0, EE = 0.00669342162296594323;
+  const outCN = (lon,lat)=>!(lon>73.66&&lon<135.05&&lat>3.86&&lat<53.55);
+  const tLat=(x,y)=>{let r=-100+2*x+3*y+0.2*y*y+0.1*x*y+0.2*Math.sqrt(Math.abs(x));
+    r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3; r+=(20*Math.sin(y*PI)+40*Math.sin(y/3*PI))*2/3;
+    r+=(160*Math.sin(y/12*PI)+320*Math.sin(y*PI/30))*2/3; return r;};
+  const tLon=(x,y)=>{let r=300+x+2*y+0.1*x*x+0.1*x*y+0.1*Math.sqrt(Math.abs(x));
+    r+=(20*Math.sin(6*x*PI)+20*Math.sin(2*x*PI))*2/3; r+=(20*Math.sin(x*PI)+40*Math.sin(x/3*PI))*2/3;
+    r+=(150*Math.sin(x/12*PI)+300*Math.sin(x/30*PI))*2/3; return r;};
+  const USEG = QS.get('gcj') === '1';   // 默认关：车机 GPS 已是 GCJ
+  function wgs2gcj(lon,lat){
+    if(outCN(lon,lat)) return [lon,lat];
+    let dLat=tLat(lon-105,lat-35), dLon=tLon(lon-105,lat-35);
+    const rad=lat/180*PI; let m=Math.sin(rad); m=1-EE*m*m; const sq=Math.sqrt(m);
+    dLat=(dLat*180)/((AXIS*(1-EE))/(m*sq)*PI);
+    dLon=(dLon*180)/(AXIS/sq*Math.cos(rad)*PI);
+    return [lon+dLon, lat+dLat];
+  }
+
+  /* ---------- 矢量地图 ---------- */
+  function initVector(){
+    if (QS.get('nosz') !== '1') window._AMapSecurityConfig = { securityJsCode: AMAP_SEC };
+    const s = document.createElement('script');
+    s.src = 'https://webapi.amap.com/maps?v=1.4.15&' + ('key' + '=' + encodeURIComponent(AMAP_KEY));
+    s.onload = () => {
+      const opt = {
+        zoom: 15, center: [carLon(), carLat()], viewMode: '2D',
+        dragEnable:false, zoomEnable:false, doubleClickZoom:false, scrollWheel:false,
+        keyboardEnable:false, touchZoom:false, resizeEnable:true, zooms:[3,18]
+      };
+      if (AMAP_STYLE) opt.mapStyle = AMAP_STYLE;
+      try {
+        amap = new AMap.Map('amap', opt);
+        const ready = () => { vectorMode = true; document.getElementById('srcTag').textContent = 'AMAP VECTOR · LIVE'; };
+        amap.on('complete', ready);
+      } catch(e) { console.warn(e); }
+    };
+    s.onerror = () => { document.getElementById('srcTag').textContent = 'AMAP LOAD FAIL'; };
+    document.head.appendChild(s);
+  }
+
+  let lastSync = 0;
+  function syncMap(now){
+    if (!amap || !vectorMode || now - lastSync < 90) return;
+    lastSync = now;
+    let lon = carLon(), lat = carLat();
+    if (USEG) { const g = wgs2gcj(lon, lat); lon = g[0]; lat = g[1]; }
+    const span = spanFor(state.speed);
+    const ppmZ0 = 156543.03392 * Math.cos(lat*PI/180);
+    const zoom = Math.log2(ppmZ0 / (span / MAP_W)) + Math.log2(1.7);   // #amap 容器 170% 会等效缩小视野，这里补回
+    try { amap.setZoomAndCenter(zoom, [lon, lat]); } catch(e){}
+    lastZoom = zoom;
+    const el = document.getElementById('amap');
+    if (el) el.style.transform = 'rotate(' + (-state.heading).toFixed(1) + 'deg)';
+  }
+
+  let routePoly = null, routeDot = null;
+  function syncRoute(){
+    const rt = state.route;
+    if (!vectorMode || !amap || !window.AMap || !rt || !rt.ring || rt.ring.length < 2) return;
+    const path = rt.ring.map(q => { const g = wgs2gcj(q[0], q[1]); return [g[0], g[1]]; });
+    try {
+      if (!routePoly) {
+        routePoly = new AMap.Polyline({ path: path, strokeColor: '#25e3c9', strokeWeight: 5,
+          strokeOpacity: 0.95, lineJoin: 'round', lineCap: 'round', zIndex: 200, showDir: false });
+        amap.add(routePoly);
+      } else { routePoly.setPath(path); }
+      const last = path[path.length - 1];
+      if (!routeDot) {
+        routeDot = new AMap.Circle({ center: last, radius: 8, fillColor: '#ffb545',
+          fillOpacity: 1, strokeColor: '#000', strokeWeight: 1, zIndex: 201 });
+        amap.add(routeDot);
+      } else { routeDot.setCenter(last); }
+    } catch (e) {}
+  }
+
+  /* ---------- 栅格兜底：/t/{z}/{x}/{y}.png（矢量未就绪时自动接管）---------- */
+  const TILE_TPL = QS.get('tiles') || '/t/{z}/{x}/{y}.png';
+  const tileCache = new Map();
+  let TILE_OK = 0, TILE_BAD = 0;
+  const tileUrl = (z,x,y) => TILE_TPL.replace('{z}',z).replace('{x}',x).replace('{y}',y);
+
+  function getTile(z,x,y){
+    const key = z+'/'+x+'/'+y;
+    if (tileCache.has(key)) return tileCache.get(key);
+    const e = { img: null };
+    tileCache.set(key, e);
+    const im = new Image();
+    im.onload = () => { e.img = im; TILE_OK++; };
+    im.onerror = () => { TILE_BAD++; };
+    im.src = tileUrl(z,x,y);
+    return e;
+  }
+
+  function drawRaster(h){
+    let lon = carLon(), lat = carLat();
+    if (USEG) { const g = wgs2gcj(lon, lat); lon = g[0]; lat = g[1]; }
+    const span = spanFor(state.speed);
+    const wantPPM = span / MAP_W;
+    const ppmZ0 = 156543.03392 * Math.cos(lat*PI/180);
+    const z = clamp(Math.ceil(Math.log2(ppmZ0 / wantPPM)), 2, 19);
+    const ppm0 = ppmZ0 / Math.pow(2, z);
+    const k = ppm0 / wantPPM;
+    const n = 256 * Math.pow(2, z);
+    const cx = (lon + 180) / 360 * n;
+    const sy = Math.sin(lat*PI/180);
+    const cy = (0.5 - Math.log((1+sy)/(1-sy))/(4*PI)) * n;
+    const rad = 240 / k, max = Math.pow(2, z);
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(MAP_X, 0, MAP_W, H); ctx.clip();
+    ctx.translate(MAP_CX, MAP_CY);
+    ctx.rotate(-h);
+    ctx.scale(k, k);
+    ctx.translate(-cx, -cy);
+    for (let tx = Math.max(0, Math.floor((cx-rad)/256)); tx <= Math.min(max-1, Math.ceil((cx+rad)/256)); tx++){
+      for (let ty = Math.max(0, Math.floor((cy-rad)/256)); ty <= Math.min(max-1, Math.ceil((cy+rad)/256)); ty++){
+        const t = getTile(z,tx,ty);
+        if (t.img) ctx.drawImage(t.img, tx*256, ty*256);
+      }
+    }
+    drawRouteLine(z, k, cx, cy, n, lon, lat);
+    ctx.restore();
+    // 压暗栅格：路名/POI 标注是高德烧进图里的，只能用暗层压下去
+    ctx.fillStyle = 'rgba(0,0,0,.25)';
+    ctx.fillRect(MAP_X, 0, MAP_W, H);
+  }
+
+  function drawRouteLine(z, k, cx, cy, n, clon, clat){
+    const rt = state.route;
+    if (!rt || !rt.ring || rt.ring.length < 2) return;
+    const pts = rt.ring.map(q => { const g = wgs2gcj(q[0], q[1]); return [g[0], g[1]]; });
+    const px = (lo) => (lo + 180) / 360 * n;
+    const py = (la) => { const s2 = Math.sin(la*PI/180);
+      return (0.5 - Math.log((1+s2)/(1-s2))/(4*PI)) * n; };
+    ctx.save();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // 外发光
+    ctx.strokeStyle = 'rgba(37,227,201,.28)';
+    ctx.lineWidth = 11 / k;
+    ctx.beginPath();
+    pts.forEach((pt,i) => {
+      const x = px(pt[0]), y = py(pt[1]);
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+    // 主线
+    ctx.strokeStyle = 'rgba(37,227,201,.95)';
+    ctx.lineWidth = 5 / k;
+    ctx.beginPath();
+    pts.forEach((pt,i) => {
+      const x = px(pt[0]), y = py(pt[1]);
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+    // 终点
+    const last = rt.ring[rt.ring.length-1];
+    ctx.beginPath();
+    ctx.arc(px(last[0]), py(last[1]), 7/k, 0, Math.PI*2);
+    ctx.fillStyle = '#ffb545'; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.65)'; ctx.lineWidth = 2/k; ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawRouteCanvas(z){
+    const rt = state.route;
+    if (!rt || !rt.ring || rt.ring.length < 2) return;
+    const n = 256 * Math.pow(2, z);
+    let clon = carLon(), clat = carLat();
+    if (USEG) { const g = wgs2gcj(clon, clat); clon = g[0]; clat = g[1]; }
+    const cpx = (clon + 180) / 360 * n;
+    const sy0 = Math.sin(clat*PI/180);
+    const cpy = (0.5 - Math.log((1+sy0)/(1-sy0))/(4*PI)) * n;
+    const px = lo => (lo + 180) / 360 * n;
+    const py = la => { const sy = Math.sin(la*PI/180);
+      return (0.5 - Math.log((1+sy)/(1-sy))/(4*PI)) * n; };
+    const pts = rt.ring.map(q => { const g = wgs2gcj(q[0], q[1]); return [g[0], g[1]]; });
+    ctx.save();
+    ctx.beginPath(); ctx.rect(MAP_X, 0, MAP_W, H); ctx.clip();
+    ctx.translate(MAP_CX, MAP_CY);
+    ctx.rotate(-state.heading*PI/180);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.beginPath();
+    pts.forEach((q,i) => { const x = px(q[0])-cpx, y = py(q[1])-cpy;
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y); });
+    ctx.strokeStyle = 'rgba(37,227,201,.28)'; ctx.lineWidth = 11; ctx.stroke();
+    ctx.strokeStyle = 'rgba(37,227,201,.95)'; ctx.lineWidth = 5; ctx.stroke();
+    const last = pts[pts.length-1];
+    ctx.beginPath(); ctx.arc(px(last[0])-cpx, py(last[1])-cpy, 7, 0, Math.PI*2);
+    ctx.fillStyle = '#ffb545'; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---------- 地图羽化 ---------- */
+  function feather(){
+    const L=62,R=62,Tp=40,B=54;
+    let g;
+    g = ctx.createLinearGradient(MAP_X,0,MAP_X+L,0);
+    g.addColorStop(0,'#000'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(MAP_X,0,L,H);
+    g = ctx.createLinearGradient(MAP_X+MAP_W,0,MAP_X+MAP_W-R,0);
+    g.addColorStop(0,'#000'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(MAP_X+MAP_W-R,0,R,H);
+    g = ctx.createLinearGradient(0,0,0,Tp); g.addColorStop(0,'#000'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(MAP_X,0,MAP_W,Tp);
+    g = ctx.createLinearGradient(0,H,0,H-B); g.addColorStop(0,'#000'); g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=g; ctx.fillRect(MAP_X,H-B,MAP_W,B);
+  }
+
+  function carMark(){
+    const halo = ctx.createRadialGradient(MAP_CX,MAP_CY,1,MAP_CX,MAP_CY,24);
+    halo.addColorStop(0,'rgba(0,0,0,.92)'); halo.addColorStop(.6,'rgba(0,0,0,.5)'); halo.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(MAP_CX,MAP_CY,24,0,Math.PI*2); ctx.fill();
+    ctx.save(); ctx.translate(MAP_CX,MAP_CY);
+    ctx.shadowColor='rgba(255,255,255,.95)'; ctx.shadowBlur=16;
+    ctx.beginPath(); ctx.moveTo(0,-13); ctx.lineTo(9.5,10.5); ctx.lineTo(0,4.5); ctx.lineTo(-9.5,10.5);
+    ctx.closePath(); ctx.fillStyle='#ffffff'; ctx.fill(); ctx.restore();
+  }
+
+  /* ---------- 左区：车速 + 挡位 ---------- */
+  function drawCountdown(){
+    const hasLight = state.lightLive && state.lightColor;
+    const cd = hasLight ? Math.max(0, Math.round(state.countdown || 0)) : null;
+    const red = hasLight && state.lightColor === 'red';
+    const yellow = hasLight && state.lightColor === 'yellow';
+    const r = 15, padL = 7, padR = 12, padY = 8, gap = 12;
+
+    ctx.font = '700 34px ' + FONT;
+    const txt = (cd === null) ? '—' : String(cd);
+    const tw = ctx.measureText(txt).width;
+
+    const w = padL + r * 2 + gap + tw + padR;
+    const x1 = 296, x0 = x1 - w;          // 贴左区右边缘
+    const cy0 = 52;                       // 保持原 y，仅水平平移
+    const y0 = cy0 - r - padY, y1 = cy0 + r + padY;
+    const cx0 = x0 + padL + r;
+
+    ctx.save();
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x0, y0, x1 - x0, y1 - y0, (y1 - y0) / 2);
+    else ctx.rect(x0, y0, x1 - x0, y1 - y0);
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = 'rgba(255,255,255,.85)';
+    ctx.shadowColor = 'rgba(255,255,255,.32)';
+    ctx.shadowBlur = 6;
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.shadowColor = !hasLight ? 'rgba(150,170,175,.35)' : (red ? 'rgba(255,70,70,.95)' : 'rgba(45,220,130,.95)');
+    ctx.shadowBlur = 18;
+    ctx.beginPath(); ctx.arc(cx0, cy0, r, 0, Math.PI * 2);
+    const g = ctx.createRadialGradient(cx0 - 4, cy0 - 5, 2, cx0, cy0, r);
+    if (!hasLight) { g.addColorStop(0, '#5b6a6e'); g.addColorStop(.55, '#3b474a'); g.addColorStop(1, '#232c2e'); }
+    else if (red) { g.addColorStop(0, '#ff8a80'); g.addColorStop(.55, '#ff3b30'); g.addColorStop(1, '#c1121f'); }
+    else if (yellow) { g.addColorStop(0, '#ffe08a'); g.addColorStop(.55, '#ffc107'); g.addColorStop(1, '#c79100'); }
+    else { g.addColorStop(0, '#a8ffcf'); g.addColorStop(.55, '#2ad07a'); g.addColorStop(1, '#0f8f4d'); }
+    ctx.fillStyle = g; ctx.fill();
+    ctx.restore();
+
+    ctx.font = '700 34px ' + FONT;
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(txt, cx0 + r + gap, cy0 + 13);
+  }
+
+  /* ---------- 右区：时速（右对齐 x=940，measureText 自适应，撑满安全框不溢出） ---------- */
+  function drawSpeedRight(){
+    const sp = (state.speed === null || state.speed === undefined) ? '—' : String(Math.round(state.speed));
+    const R = 940, MAXW = 280;                        // 右区 x∈[660,940]
+    let fs = 200, m;
+    for (;;) {
+      ctx.font = '700 ' + fs + 'px ' + FONT;
+      m = ctx.measureText(sp);
+      const hgt = (m.actualBoundingBoxAscent || fs * 0.72) + (m.actualBoundingBoxDescent || fs * 0.2);
+      if ((m.width <= MAXW && hgt <= 198) || fs <= 120) break;
+      fs -= 6;
+    }
+    const asc = m.actualBoundingBoxAscent || fs * 0.72, desc = m.actualBoundingBoxDescent || fs * 0.2;
+    let base = 120 + (asc - desc) / 2;                // 安全框 y∈[20,220] 内垂直居中
+    base = Math.min(219 - desc, Math.max(21 + asc, base));
+    ctx.save();
+    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(sp, R, base);
+    ctx.font = '500 28px ' + FONT; ctx.fillStyle = 'rgba(160,196,198,.62)';
+    ctx.fillText('km/h', R - m.width - 10, 212);      // 单位小字，底对齐
+    ctx.restore();
+  }
+
+  /* ---------- 导航动作图标：块状实心箭头（宽三角头 + 方头粗杆）---------- */
+  const MANEUVERS = [
+    { id: 'straight', label: '直行' },
+    { id: 'right',    label: '右转' },
+    { id: 'left',     label: '左转' },
+    { id: 'sright',   label: '偏右' },
+    { id: 'sleft',    label: '偏左' },
+    { id: 'uturn',    label: '掉头' },
+    { id: 'round',    label: '环岛' },
+    { id: 'arrive',   label: '到达' }
+  ];
+
+  function drawManeuver(type, cx, cy, size){
+    const s = size / 100;
+    const SHAFT = 26, HW = 32, HL = 40;
+    ctx.save();
+    ctx.translate(cx - size / 2, cy - size / 2);
+    ctx.scale(s, s);
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#fff';
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
+
+    const head = (x, y, ang, sc) => {
+      const lv = HL * (sc || 1), wv = HW * (sc || 1);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.moveTo(lv, 0); ctx.lineTo(0, wv); ctx.lineTo(0, -wv);
+      ctx.closePath(); ctx.fill(); ctx.restore();
+    };
+    const shaft = pts => {
+      ctx.lineWidth = SHAFT;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+    };
+
+    if (type === 'straight') {
+      shaft([[50, 100], [50, 44]]); head(50, 44, -Math.PI / 2);
+    } else if (type === 'right') {
+      shaft([[26, 100], [26, 56], [58, 56]]); head(58, 56, 0);
+    } else if (type === 'left') {
+      shaft([[74, 100], [74, 56], [42, 56]]); head(42, 56, Math.PI);
+    } else if (type === 'sright') {
+      const a = Math.atan2(-60, 30);
+      shaft([[30, 100], [55, 50]]); head(55, 50, a);
+    } else if (type === 'sleft') {
+      const a = Math.atan2(-60, -30);
+      shaft([[70, 100], [45, 50]]); head(45, 50, a);
+    } else if (type === 'uturn') {
+      ctx.lineWidth = SHAFT;
+      ctx.beginPath();
+      ctx.moveTo(26, 100); ctx.lineTo(26, 58);
+      ctx.arc(50, 58, 24, Math.PI, Math.PI * 2, false);
+      ctx.lineTo(74, 66);
+      ctx.stroke();
+      head(74, 66, Math.PI / 2);
+    } else if (type === 'round') {
+      const r = 24;
+      ctx.lineWidth = 20;
+      // 完整圆环
+      ctx.beginPath(); ctx.arc(50, 52, r, 0, Math.PI * 2);
+      ctx.stroke();
+      // 入口短杆（底部）
+      ctx.beginPath(); ctx.moveTo(50, 100); ctx.lineTo(50, 52 + r);
+      ctx.stroke();
+      // 环外右上切向箭头
+      const aE = -Math.PI * 0.28;
+      const ex = 50 + (r + 9) * Math.cos(aE), ey = 52 + (r + 9) * Math.sin(aE);
+      head(ex, ey, aE - Math.PI / 2, 0.78);
+    } else if (type === 'arrive') {
+      ctx.lineWidth = 16;
+      ctx.beginPath(); ctx.moveTo(46, 100); ctx.lineTo(46, 18); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(46, 16); ctx.lineTo(92, 32); ctx.lineTo(46, 48);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(46, 100, 11, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* ---------- 图标渲染：优先 icons.json 的 SVG path，缺失回退 canvas 手绘 ---------- */
+  const ICON_KEY = { straight: 'straight', right: 'turn_right', left: 'turn_left',
+    sright: 'turn_slight_right', sleft: 'turn_slight_left', uturn: 'u_turn_left',
+    round: 'roundabout_right', arrive: 'flag' };
+  const ICONS = {};
+  fetch('icons.json').then(r => r.json())
+    .then(j => { Object.assign(ICONS, j); })
+    .catch(() => {});                                // file:// 受限时静默回退手绘
+  function drawIcon(type, cx, cy, size){
+    const d = ICONS[ICON_KEY[type]];
+    if (d) {
+      ctx.save();
+      ctx.translate(cx - size / 2, cy - size / 2);
+      ctx.scale(size / 960, size / 960); ctx.translate(0, 960);
+      ctx.fillStyle = '#fff'; ctx.fill(new Path2D(d));
+      ctx.restore();
+    } else {
+      drawManeuver(ICON_KEY[type] ? type : 'straight', cx, cy, size);
+    }
+  }
+
+  /* ---------- 左组：动作图标(80px, 横排间距≥12) + 距离/路名两行，x 从 20 起 ---------- */
+  function drawNavLeft(){
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    const act = state.maneuver || 'straight';
+    const navOn = state.navLive || state.nav.navi || QS.get('dist') !== null;
+    const IS = 80;                                   // 图标高 80（规格 72-88）
+    drawIcon(act, 20 + IS / 2, 120, IS);             // 安全框内垂直居中 y=120
+    const tx = 20 + IS + 12;                         // 图标右侧 12px 接文字块
+    const maxW = 300 - tx;                           // 左组止于 x=300，不侵入地图带
+    if (!navOn) {
+      ctx.font = '700 68px ' + FONT; ctx.fillStyle = 'rgba(230,246,243,.9)';
+      ctx.fillText('—', tx, 112);
+      ctx.font = '600 36px ' + FONT; ctx.fillStyle = 'rgba(140,178,180,.55)';
+      ctx.fillText('无导航', tx, 168);
+      return;
+    }
+    const dM = state.nav.distance;
+    let mainTxt = '—';
+    if (typeof dM === 'number') {
+      if (dM < 50) mainTxt = '现在';
+      else if (dM < 1000) mainTxt = String(Math.round(dM)) + 'm';
+      else mainTxt = (dM / 1000).toFixed(1) + 'km';
+    }
+    let fs = 68; ctx.font = '700 ' + fs + 'px ' + FONT;   // 上行：动作距离 64-72 粗体
+    while (fs > 56 && ctx.measureText(mainTxt).width > maxW) { fs -= 2; ctx.font = '700 ' + fs + 'px ' + FONT; }
+    ctx.fillStyle = '#fff';
+    ctx.fillText(mainTxt, tx, 112);
+    let road = String(state.nav.road || '').split('·')[0].trim() || '未导航';   // 下行：路名 36px，超长省略号
+    ctx.font = '600 36px ' + FONT; ctx.fillStyle = 'rgba(214,255,248,.88)';
+    if (ctx.measureText(road).width > maxW) {
+      while (road.length > 1 && ctx.measureText(road + '…').width > maxW) road = road.slice(0, -1);
+      road += '…';
+    }
+    ctx.fillText(road, tx, 168);
+  }
+
+  function update(dt){
+    if (state.auto){
+      const t = (performance.now()-t0)/1000;
+      state.speed = 62 + 46*Math.sin(t*0.30) + 8*Math.sin(t*0.11);
+      state.heading = (18 + 32*Math.sin(t*0.14)) % 360;
+      if (state.heading < 0) state.heading += 360;
+    }
+    state.speed = clamp(state.speed, 0, 220);
+    if (state.lightLive && typeof state.countdown === 'number' && state.countdown > 0) {
+      state.countdown = Math.max(0, state.countdown - dt);   // 真值之间平滑
+    }
+    const sp = state.speed;
+    if (!state.gearLive && state.dataLive && typeof state.speed === 'number') {
+      state.gear = sp < 15 ? '1' : sp < 30 ? '2' : sp < 45 ? '3' : sp < 60 ? '4'
+                 : sp < 80 ? '5' : sp < 100 ? '6' : sp < 120 ? '7' : sp < 150 ? '8' : '9';
+    }
+    const v = state.speed/3.6, h = state.heading*Math.PI/180;
+    car.x += Math.sin(h)*v*dt; car.z += Math.cos(h)*v*dt; state.odo += v*dt;
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    const h = state.heading * Math.PI / 180;
+    if (!vectorMode){ ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H); if (MAP_ON) drawRaster(h); }
+    else { drawRouteCanvas(lastZoom); }
+    feather();
+    carMark();
+    drawNavLeft();
+    drawSpeedRight();
+  }
+
+  function loop(now){
+    const dt = Math.min(0.05,(now-last)/1000); last = now;
+    update(dt); syncMap(now); syncRoute(); draw();
+    state.fps = state.fps*0.9 + (1/Math.max(dt,1e-4))*0.1;
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  const el = id => document.getElementById(id);
+  const sSpeed=el('sSpeed'), sHead=el('sHead'), sDist=el('sDist');
+  const vSpeed=el('vSpeed'), vHead=el('vHead'), vDist=el('vDist'), vFps=el('vFps');
+  const cAuto=el('cAuto'), cBare=el('cBare');
+
+  function syncUI(){
+    sSpeed.value=Math.round(state.speed); sHead.value=Math.round(state.heading);
+    sDist.value=state.nav.distance;
+    vSpeed.textContent=Math.round(state.speed)+' km/h';
+    vHead.textContent=Math.round(state.heading)+'°';
+    vDist.textContent=Math.round(state.nav.distance)+' m';
+    vFps.textContent=Math.round(state.fps)+' fps';
+    cAuto.classList.toggle('on', state.auto);
+  }
+  setInterval(syncUI, 300);
+  sSpeed.addEventListener('input',()=>{state.auto=false;state.speed=+sSpeed.value;syncUI();});
+  sHead.addEventListener('input',()=>{state.auto=false;state.heading=+sHead.value;syncUI();});
+  sDist.addEventListener('input',()=>{state.nav.distance=+sDist.value;syncUI();});
+  cAuto.addEventListener('click',()=>{state.auto=!state.auto;syncUI();});
+  const mvRow = el('mvRow');
+  MANEUVERS.forEach(m => {
+    const d = document.createElement('div');
+    d.className = 'chip' + (m.id === state.maneuver ? ' on' : '');
+    d.dataset.mv = m.id;
+    d.textContent = m.label;
+    d.addEventListener('click', () => {
+      state.maneuver = m.id;
+      el('vManeuver').textContent = m.label;
+      [...mvRow.children].forEach(c => c.classList.toggle('on', c.dataset.mv === m.id));
+    });
+    mvRow.appendChild(d);
+  });
+
+  function toggleBare(){document.body.classList.toggle('bare');
+    cBare.classList.toggle('on',document.body.classList.contains('bare'));}
+  cBare.addEventListener('click',toggleBare);
+  el('panel').addEventListener('dblclick',()=>{
+    if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+    else document.exitFullscreen();});
+  window.addEventListener('keydown',e=>{
+    if(e.key==='ArrowUp'){state.auto=false;state.speed=Math.min(220,state.speed+2);syncUI();}
+    else if(e.key==='ArrowDown'){state.auto=false;state.speed=Math.max(0,state.speed-2);syncUI();}
+    else if(e.key==='ArrowRight'){state.auto=false;state.heading=(state.heading+2)%360;syncUI();}
+    else if(e.key==='ArrowLeft'){state.auto=false;state.heading=(state.heading+358)%360;syncUI();}
+    else if(e.key==='a'||e.key==='A'){state.auto=!state.auto;syncUI();}
+    else if(e.key==='f'||e.key==='F') el('panel').dispatchEvent(new Event('dblclick'));});
+  if (QS.get('bare')==='1') toggleBare();
+
+  window.HUD = { state, feed(d){
+    if(typeof d.speed==='number'){state.auto=false;state.speed=d.speed;}
+    if(typeof d.heading==='number'){state.auto=false;state.heading=((d.heading%360)+360)%360;}
+    if(d.gear) state.gear=d.gear;
+    if(typeof d.lat==='number'&&typeof d.lon==='number') state.gps={lat:d.lat,lon:d.lon};
+    if(d.nav) Object.assign(state.nav,d.nav);
+    syncUI(); } };
+
+
+  /* ---------- 实时数据：轮询 state.json（Pi 上由 pi/bridge.py 写入）---------- */
+  async function pollState(){
+    try {
+      const r = await fetch('state.json?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const f = {};
+      const nowT = Date.now() / 1000;
+      state.dataLive = (d.src_ok !== false) && typeof d.ts === 'number' && (nowT - d.ts < 5);
+      if (!state.dataLive) { state.speed = null; state.gear = '—'; }
+      if (state.dataLive && typeof d.speed === 'number') f.speed = d.speed;
+      if (typeof d.heading === 'number') f.heading = d.heading;
+      if (d.gear) f.gear = String(d.gear);
+      if (typeof d.lat === 'number' && typeof d.lon === 'number') { f.lat = d.lat; f.lon = d.lon; }
+      if (typeof d.rpm === 'number') state.rpm = d.rpm;
+      if (d.gear) { state.gear = String(d.gear); state.gearLive = true; f.gear = state.gear; }
+      if (d.nav && typeof d.nav === 'object') {
+        if (typeof d.nav.distance === 'number') state.nav.distance = d.nav.distance;
+        if (typeof d.nav.road === 'string' && d.nav.road) state.nav.road = d.nav.road;
+        if (typeof d.nav.remain === 'number') state.nav.remain = d.nav.remain;
+        if (typeof d.nav.action === 'string' && d.nav.action) state.nav.action = d.nav.action;
+        if (d.nav.eta) state.nav.eta = d.nav.eta;
+        if (d.nav.navi === false) state.nav.road = '未导航';
+      }
+      if (d.maneuver) state.maneuver = d.maneuver;
+      if (d.route && d.route.ring && d.route.ring.length > 1) {
+        state.route = d.route; state.routeTs = Date.now();
+      } else if (state.route && Date.now() - (state.routeTs || 0) > 120000) {
+        state.route = null;   // 只有超过 2 分钟没拿到新路线才清掉，避免闪断
+      }
+      const nowS = Date.now() / 1000;
+      state.navLive = !!(d.nav && d.nav.navi && (nowS - (d.nav.ts || 0) < 30));
+      const lt = d.light && d.light.color;
+      const lFresh = lt && ((nowS - (d.light.ts || 0) < 15) ||
+                            (typeof d.countdown === 'number' && d.countdown > 0));
+      if (lFresh) {
+        state.lightLive = true; state.lightColor = d.light.color;
+        state.countdown = typeof d.countdown === 'number' ? d.countdown : (d.light.sec || 0);
+      } else { state.lightLive = false; state.lightColor = null; }
+      if (Object.keys(f).length) window.HUD.feed(f);
+    } catch (e) {}
+  }
+  if (QS.get('live') !== '0') setInterval(pollState, 150);
+  syncUI();
+  if (MAP_ON && QS.get('vec')!=='0') initVector();   // 默认关闭地图；?map=1 才加载
+})();
+</script>
+<script>
+(function(){
+  var el = document.getElementById('blackout');
+  var qs = new URLSearchParams(location.search);
+  var IDLE_MS = (parseInt(qs.get('idle') || '1200', 10) || 1200) * 1000;   // 默认 20 分钟，?idle=秒 可测
+  var RUN_RPM = 50;              // 判定"着车"的转速阈值
+  var lastRun = Date.now(), on = false;
+  function tick(){
+    var st = (window.HUD && window.HUD.state) || null;
+    var rpm = st ? st.rpm : null;
+    if (window.__rpmOverride != null) rpm = window.__rpmOverride;   // 仅测试用
+    var running = !!((st && st.dataLive) && typeof rpm === 'number' && rpm > RUN_RPM);
+    if (running) lastRun = Date.now();
+    var want = !running && (Date.now() - lastRun > IDLE_MS);
+    if (want !== on) { on = want; el.style.display = want ? 'block' : 'none'; }
+    window.__blk = { on: on, elapsed: Math.round((Date.now()-lastRun)/1000), idle: IDLE_MS/1000, rpm: rpm };
+  }
+  setInterval(tick, 400);
+  tick();
+})();
+</script>
+</body>
+</html>

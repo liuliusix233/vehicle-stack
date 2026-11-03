@@ -1,0 +1,131 @@
+title: 户外电源
+path: outdoor-power
+icon: mdi:battery-charging
+type: custom:grid-layout
+layout:
+  grid-template-columns: 1fr 1fr
+  gap: 12px
+
+cards:
+
+  # ── 电量 & 剩余时间 (占两列) ──
+  - type: horizontal-stack
+    grid_options:
+      columns: 2
+    cards:
+      - type: gauge
+        entity: sensor.cadillac_battery
+        name: 电量
+        unit: '%'
+        severity:
+          red: 10
+          yellow: 20
+          green: 50
+        needle: false
+
+
+  - type: entity
+    entity: sensor.cadillac_remaining
+    name: 剩余可用
+    icon: mdi:clock-end
+    grid_options:
+      columns: 2
+
+  # ── 分隔线 ──
+  - type: divider
+    grid_options:
+      columns: 2
+
+  # ── 电源端口 ──
+  - type: heading
+    heading: 🔌 端口状态
+    grid_options:
+      columns: 2
+
+  - type: entity
+    entity: sensor.cadillac_car_voltage
+    name: 电瓶电压
+    icon: mdi:car-battery
+
+  - type: entity
+    entity: sensor.cadillac_sdc_type
+    name: 连接设备
+    icon: mdi:connection
+
+  - type: entity
+    entity: sensor.cadillac_discharge_power
+    name: 总放电
+    icon: mdi:flash-outline
+
+  - type: entity
+    entity: sensor.cadillac_charge_power
+    name: 总充电
+    icon: mdi:flash
+
+  - type: entity
+    entity: sensor.cadillac_sdc_charge_w
+    name: SDC 充电(入)
+    icon: mdi:battery-charging
+
+  - type: entity
+    entity: sensor.cadillac_sdc_discharge_w
+    name: SDC 放电(出)
+    icon: mdi:battery-off
+
+  - type: entity
+    entity: sensor.cadillac_temperature
+    name: 电池温度
+    icon: mdi:thermometer
+
+  - type: entity
+    entity: binary_sensor.cadillac_sdc_connected
+    name: SDC 汽车连接
+    icon: mdi:car-connected
+
+  - type: entity
+    entity: sensor.cadillac_ac_charge_w
+    name: AC 充电(入)
+    icon: mdi:power-plug
+
+  - type: entity
+    entity: sensor.cadillac_ac_discharge_w
+    name: AC 放电(出)
+    icon: mdi:power-plug-off
+
+  # ── 分隔线 ──
+  - type: divider
+    grid_options:
+      columns: 2
+
+  # ── 历史趋势 ──
+  - type: heading
+    heading: 📈 历史趋势
+    grid_options:
+      columns: 2
+
+  - type: history-graph
+    title: 电量趋势
+    entities:
+      - entity: sensor.cadillac_battery
+        name: 电量
+    hours_to_show: 24
+    refresh_interval: 60
+    grid_options:
+      columns: 2
+
+  - type: history-graph
+    title: 电压趋势
+    entities:
+      - entity: sensor.cadillac_car_voltage
+        name: 电瓶电压
+    hours_to_show: 24
+    refresh_interval: 60
+    grid_options:
+      columns: 2
+
+  - type: entity
+    entity: sensor.cadillac_last_update
+    name: 数据更新时间
+    icon: mdi:update
+    grid_options:
+      columns: 2

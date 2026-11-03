@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "sensor": "sensor.car_sdc_voltage",
+  "on_v": 13.2,
+  "off_v": 13.0,
+  "hold_on_s": 12,
+  "hold_off_s": 15,
+  "arm_switch": "input_boolean.car_auto_ac",
+  "min_interval_s": 30,
+  "ignore_off_after_on_s": 60,
+  "ignore_on_after_off_s": 30,
+  "rail_guard": true,
+  "rail_warn_v": 11.8,
+  "rail_warn_s": 20,
+  "rail_cut_v": 11.5,
+  "rail_cut_s": 60,
+  "protected_ports": [],
+  "manual_hold_s": 900,
+  "soc_sensor": "sensor.car_power_soc",
+  "soc_min_pct": 10,
+  "soc_resume_pct": 12
+}

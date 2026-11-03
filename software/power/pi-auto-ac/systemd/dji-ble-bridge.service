@@ -1,0 +1,18 @@
+[Unit]
+Description=DJI Power BLE bridge (car Pi)
+After=bluetooth.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/<USER>/dji_ble
+ExecStartPre=-/usr/bin/bluetoothctl disconnect <MAC>
+ExecStart=/home/<USER>/dji_ble/venv/bin/python /home/<USER>/dji_ble/bridge.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/<USER>/dji_ble/bridge.log
+StandardError=append:/home/<USER>/dji_ble/bridge.log
+
+[Install]
+WantedBy=multi-user.target

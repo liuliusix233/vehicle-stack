@@ -1,0 +1,6 @@
+id=adb_restore
+name=ADB-Restore
+version=v1.0
+versionCode=1
+author=Vox
+description=恢复ADB WiFi免密调试（service.adb.secure=0 + tcp 5555）

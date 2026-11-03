@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>DIYHUD</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;overflow:hidden}
+  #flip{position:absolute;inset:0;transform-origin:50% 50%}
+  #stage{position:absolute;top:0;left:0;width:960px;height:240px;
+         transform-origin:0 0;transform:rotate(90deg) translateY(-240px);background:#000}
+  #hud{position:absolute;top:0;left:0;width:960px;height:240px;border:0;display:block;background:#000}
+</style></head>
+<body>
+<div id="flip"><div id="stage"><iframe id="hud" scrolling="no" frameborder="0"></iframe></div></div>
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+  var v = q.get('v') || Date.now();
+  var dx = parseFloat(q.get('dx') || '0');
+  var dy = parseFloat(q.get('dy') || '0');
+  var flip = q.get('flip') === '1';
+  if (flip) document.getElementById('flip').style.transform = 'scaleY(-1)';
+  var st = document.getElementById('stage');
+  st.style.left = Math.round((innerWidth - 240) / 2 + dx) + 'px';
+  st.style.top  = Math.round((innerHeight - 960) / 2 + dy) + 'px';
+  document.getElementById('hud').src = 'index.html?bare=1&v=' + encodeURIComponent(v);
+})();
+</script>
+</body></html>

@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=480, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>HUD v5</title>
+<style>
+  @font-face {
+    font-family: 'Odibee Sans';
+    src: url('OdibeeSans-Regular.ttf') format('truetype');
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{width:100%;height:100%;overflow:hidden;background:#000}
+  body{display:flex;align-items:center;justify-content:center}
+
+  .hud{
+    width:100vw;height:100vh;background:#000;color:#fff;
+    font-family:'Odibee Sans','Courier New',monospace;
+    display:grid;
+    grid-template-columns:[c1] 1fr [c2] 1fr [c3] 1fr [c4] 1fr;
+    grid-template-rows:[r1] 1fr [r2] 2.2fr [r3] 1.3fr;
+    padding:0 2vw;
+  }
+
+  /* ===== Compass — Continuous Scale Bar ===== */
+  .compass-box{
+    grid-column:1/5;grid-row:1;
+    position:relative;overflow:hidden;
+    padding:0 10vw;
+  }
+  .compass-strip{
+    position:absolute;bottom:0;left:0;
+    height:100%;
+    will-change:transform;
+    transform:translate3d(0,0,0);
+    transition:transform 0.15s ease-out;
+  }
+  /* Ticks */
+  .ct{position:absolute;bottom:18%;width:1px}
+  /* Degree labels */
+  .ct-deg{
+    position:absolute;bottom:4%;
+    font-size:2vw;color:#556688;
+    transform:translateX(-50%);
+    white-space:nowrap;
+    font-family:inherit;
+  }
+  /* Direction labels (北东北东西南西北) */
+  .ct-lbl{
+    position:absolute;bottom:28%;
+    font-size:3vw;color:#99bbdd;
+    transform:translateX(-50%);
+    white-space:nowrap;
+    font-family:inherit;
+    font-weight:bold;
+  }
+  /* Fixed center indicator */
+  .compass-indicator{
+    position:absolute;bottom:0;left:50%;
+    transform:translateX(-50%);
+    z-index:3;
+    width:0;height:0;
+    border-left:1.4vw solid transparent;
+    border-right:1.4vw solid transparent;
+    border-bottom:2.2vw solid #FF5722;
+    filter:drop-shadow(0 0 0.8vw #FF572255);
+  }
+
+  /* ===== Speed (left) ===== */
+  .speed-box{
+    grid-column:1/3;grid-row:2;
+    display:flex;align-items:center;justify-content:center;
+    gap:0.3vw;
+  }
+  .speed-num{
+    font-size:22vw;line-height:1;color:#fff;
+    min-width:28vw;text-align:center;
+  }
+  .speed-right{
+    display:flex;flex-direction:column;
+    align-items:center;gap:0.3vh;
+  }
+  .speed-unit{font-size:3.5vw;color:#445566;line-height:1}
+  .gear-box{
+    width:8vw;height:8vw;
+    background:#fff;border-radius:0.6vw;
+    display:flex;justify-content:center;align-items:center;
+    font-size:5vw;line-height:1;color:#000;
+  }
+
+  /* ===== RPM (right side) ===== */
+  .rpm-box{
+    grid-column:3/5;grid-row:2;
+    display:flex;flex-direction:column;
+    align-items:center;justify-content:center;
+    gap:1vh;
+    padding:0 2vw;
+    position:relative;
+  }
+  .rpm-bot{display:flex;align-items:center;justify-content:space-between;width:100%}
+  .conn-st{display:flex;gap:1vw;align-items:center}
+  .wifi-svg{display:flex;align-items:center}
+  .wifi-svg svg{width:2.2vw;height:2.2vw;display:block;fill:#445566;transition:fill 0.4s ease}
+  .wifi-svg.on svg{fill:#fff}
+  .pi-tag{
+    border:0.13vw solid #3399ff;color:#3399ff;
+    border-radius:0.35vw;padding:0.05vw 0.5vw;
+    font-size:1.6vw;line-height:1.4;height:2.2vw;
+    display:flex;align-items:center;
+    transition:all 0.4s ease;font-family:'Odibee Sans',monospace;
+  }
+  .pi-tag.off{border-color:#445566;color:#445566}
+  .ac-tag{border-color:#00e676;color:#00e676}
+  .ac-tag.off{border-color:#445566;color:#445566}
+  .nano-tag{
+    border:0.13vw solid #4CAF50;color:#4CAF50;
+    border-radius:0.35vw;padding:0.05vw 0.5vw;
+    font-size:1.6vw;line-height:1.4;height:2.2vw;
+    display:flex;align-items:center;
+    transition:all 0.4s ease;font-family:'Odibee Sans',monospace;
+  }
+  .nano-tag.off{border-color:#445566;color:#445566}
+  .rpm-label{
+    font-size:3vw;color:#445566;
+    align-self:flex-start;letter-spacing:0.3vw;
+  }
+  .rpm-bar-bg{
+    width:100%;height:3.5vh;
+    background:#0a1a2a;border-radius:0.6vh;
+    overflow:hidden;
+  }
+  .rpm-bar-fill{
+    height:100%;border-radius:0.6vh;
+    background:linear-gradient(to right,#3399ff,#66bbff,#fff);
+    transition:width 0.12s ease;
+  }
+  .rpm-number{
+    font-size:6vw;color:#66bbff;line-height:1;
+    align-self:flex-end;
+  }
+  .rpm-unit{font-size:3vw;color:#445566}
+
+  /* ===== Bottom Row ===== */
+  .bottom-row{
+    grid-column:1/5;grid-row:3;
+    display:grid;
+    grid-template-columns:1fr 2fr 1.2fr 0.8fr;
+    align-items:center;
+    gap:0.5vw;
+    padding:0.5vh 0;
+  }
+
+  /* Left: Odometer */
+  .b-left{
+    display:flex;flex-direction:column;
+    align-items:center;line-height:1.1;
+    gap:0.4vh;
+  }
+  .b-left .odo{font-size:5vw;color:#fff;}
+  .b-left .odo-l{font-size:2.5vw;color:#445566}
+  .alt-slope-row{
+    display:flex;align-items:center;gap:0.8vw;
+    font-size:2.8vw;color:#99aabb;
+  }
+  .alt-slope-row .as-lbl{color:#445566;font-size:2vw}
+  .alt-slope-row .as-sep{width:0.1vw;height:2.2vw;background:#334455}
+  .alt-slope-row .slope-val.climb{color:#FF9800}
+  .alt-slope-row .slope-val.descent{color:#4FC3F7}
+  .alt-slope-row .slope-val.flat{color:#778899}
+  .alt-slope-row #slopeIcon{font-size:2.8vw}
+
+  /* Center: Vertical stacked bars */
+  .b-center{
+    display:flex;flex-direction:column;
+    gap:1.5vh;height:100%;justify-content:center;
+  }
+  .b-item{
+    display:flex;align-items:center;
+    gap:0.8vw;height:6vh;
+  }
+  .b-item .lbl{font-size:2.5vw;color:#445566;width:3.5vw;flex-shrink:0}
+  .bar-bg{
+    flex:1;height:100%;
+    background:#0a1a2a;border-radius:0.4vh;overflow:hidden;
+  }
+  .bar-fill{height:100%;border-radius:0.4vh;transition:width 0.2s}
+  .bar-fill.bl{background:#3399ff}
+  .bar-fill.og{background:#FF5722}
+  .bar-fill.gr{background:#4CAF50}
+  /* 2026-09-29 (盒子改回): 电量/油量恢复原形式 —— 条 + 右侧百分比 */
+  .b-item .val{font-size:2.8vw;color:#fff;width:6vw;text-align:right;flex-shrink:0}
+
+  /* Middle right: 2x2 grid (V EH / L/100 SRV) */
+  .b-mid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    align-items:center;gap:0.2vw;
+    padding:0 0.3vw;
+  }
+  .b-mid .m-row{font-size:2.5vw;color:#8899aa;text-align:center;line-height:1.2}
+  .b-mid .m-val{color:#fff}
+  .b-mid .m-lbl{color:#445566;font-size:1.8vw}
+
+  /* Right: Clock */
+  .b-right .t{font-size:5vw;color:#fff;line-height:1;letter-spacing:0.2vw}
+  .b-right{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.5vh}
+  /* CO₂ 浓度条 + 人体存在 (2026-10-17) */
+  .co2-wrap{display:flex;align-items:center;gap:0.5vw}
+  .co2-bar-bg{width:9vw;height:1.2vh;background:#0a1a2a;border-radius:0.6vh;overflow:hidden}
+  .co2-bar-fill{height:100%;width:0%;border-radius:0.6vh;background:#445566;transition:width 0.4s ease,background 0.4s ease}
+  .co2-val{font-size:2.2vw;color:#99aabb;min-width:4vw;text-align:right}
+  .pres-dot{width:1.1vw;height:1.1vw;border-radius:50%;background:#333;transition:background 0.4s}
+  .pres-dot.on{background:#FF5722;box-shadow:0 0 0.6vw rgba(255,87,34,0.8)}
+
+  /* Bottom row no-data fallback */
+  .dim{color:#445566}
+
+  /* ===== Voice Overlay — Wave Animation ===== */
+  .voice-overlay{
+    position:fixed;bottom:0;right:0;
+    z-index:100;
+    display:flex;align-items:flex-end;
+    gap:0.3vw;
+    padding:0.5vw 0.8vw;
+    opacity:0;visibility:hidden;
+    transition:opacity 0.3s ease,visibility 0.3s ease;
+    pointer-events:none;
+  }
+  .voice-overlay.active{
+    opacity:1;visibility:visible;
+  }
+  .voice-overlay .v-bar{
+    width:0.6vw;border-radius:0.2vw 0.2vw 0 0;
+    background:linear-gradient(to top,#3399ff,#66bbff);
+    transition:height 0.08s ease;
+    min-height:0.3vw;
+    box-shadow:0 0 0.3vw rgba(51,153,255,0.5);
+  }
+  .voice-overlay .v-text{
+    font-size:2vw;color:#66bbff;
+    font-family:'Odibee Sans',monospace;
+    margin-left:0.5vw;
+    white-space:nowrap;
+    letter-spacing:0.1vw;
+    text-shadow:0 0 0.5vw rgba(51,153,255,0.4);
+  }
+
+  /* Speaking: different color set */
+  .voice-overlay.speaking .v-bar{
+    background:linear-gradient(to top,#4CAF50,#81C784);
+    box-shadow:0 0 0.3vw rgba(76,175,80,0.5);
+  }
+  .voice-overlay.speaking .v-text{
+    color:#81C784;
+  }
+
+  /* Processing: pulsing glow */
+  .voice-overlay.processing .v-bar{
+    animation:pulse-bar 0.5s ease infinite alternate;
+    background:linear-gradient(to top,#FF9800,#FFB74D);
+    box-shadow:0 0 0.5vw rgba(255,152,0,0.6);
+  }
+  .voice-overlay.processing .v-text{
+    color:#FFB74D;
+  }
+
+  @keyframes pulse-bar{
+    0%{height:0.3vw;opacity:0.4}
+    100%{height:1.2vw;opacity:1}
+  }
+
+  /* Voice mic icon (idle) */
+  .voice-mic{
+    position:fixed;bottom:0.5vw;right:0.5vw;
+    z-index:99;
+    width:2.5vw;height:2.5vw;
+    opacity:0.2;
+    transition:opacity 0.3s;
+    pointer-events:none;
+  }
+  .voice-mic.listening{
+    opacity:0.6;
+    animation:mic-pulse 1.5s ease infinite;
+  }
+  @keyframes mic-pulse{
+    0%,100%{opacity:0.3}
+    50%{opacity:0.7}
+  }
+
+  /* ═══════════════ THEME B2 — 纯黑+ODO (2026-08-23) ═══════════════
+     顶栏(电源输入功率|PI/NANO|罗盘|时钟) · 中央大时速+档位 · 底部 FUEL/BAT/ODO + RPM条/VOLT
+     全部 vw/vh 相对单位（Chrome 61 真机 viewport=640×320，禁硬编码 px） */
+  .ui-b{display:none}
+  body[data-theme="b"] .ui-a{display:none}
+  body[data-theme="b"] .ui-b{
+    display:block;width:100vw;height:100vh;
+    background:#000;color:#fff;
+    font-family:-apple-system,'Helvetica Neue',Helvetica,Arial,'Noto Sans CJK SC','Droid Sans Fallback','PingFang SC','Microsoft YaHei',sans-serif;
+    text-transform:uppercase;
+    position:relative;overflow:hidden;
+  }
+  /* ── 顶栏: 电源功率 | PI/NANO | 罗盘 | 时钟 ── */
+  .nb-header{
+    position:absolute;top:5vh;left:3.33vw;right:3.33vw;height:8.33vh;
+    display:flex;justify-content:space-between;align-items:center;z-index:10;
+  }
+  .nb-left{display:flex;align-items:center;height:100%}
+  .nb-power{
+    display:flex;align-items:center;height:100%;
+    font-size:2.2vw;font-weight:700;color:#00e676;
+    border:0.21vw solid rgba(0,230,118,0.4);
+    padding:0 1.25vw;border-radius:0.625vw;
+    white-space:nowrap;
+    margin-right:2.5vw;
+  }
+  .nb-power svg{width:2.5vw;height:2.5vw;margin-bottom:0.2vw;display:block;margin-right:0.83vw}
+  .nb-sys{
+    font-size:2.2vw;font-weight:700;color:#fff;letter-spacing:0.21vw;
+    display:flex;align-items:center;white-space:nowrap;
+  }
+  .nb-sys .dot{
+    width:1vw;height:1vw;background:#333;border-radius:50%;
+    display:inline-block;transition:background 0.4s ease;
+    margin-right:0.83vw;
+  }
+  .nb-sys .dot.on{background:#00A1E4;box-shadow:0 0 0.8vw rgba(0,161,228,0.8)}
+  .nb-compass{
+    font-size:2.5vw;font-weight:700;color:#fff;letter-spacing:0.42vw;
+    display:flex;align-items:center;
+    position:absolute;left:50%;transform:translateX(-50%);height:100%;white-space:nowrap;
+    font-family:'Noto Sans CJK SC','Droid Sans Fallback','PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  .nb-compass::before{content:'▼';color:#E1251B;font-size:2.08vw;margin-right:1.25vw}
+  .nb-time{font-size:2.71vw;font-weight:600;letter-spacing:0.21vw;color:#aaa;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.5vh;min-width:8vw}
+  .nb-co2row{display:flex;align-items:center;gap:0.5vw;width:100%}
+  .nb-co2{flex:1;height:1.6vh;background:#222;border-radius:0.8vh;overflow:hidden}
+  .nb-co2-fill{height:100%;width:0%;border-radius:0.8vh;background:#445566;transition:width 0.4s ease,background 0.4s ease}
+  .nb-pd{width:1vw;height:1vw;border-radius:50%;background:#333;transition:background 0.4s}
+  .nb-pd.on{background:#FF5722;box-shadow:0 0 0.5vw rgba(255,87,34,0.8)}
+  /* ── 中央: 大时速 + 档位 ── */
+  .nb-center{
+    position:absolute;top:16vh;left:0;width:100%;height:46vh;
+    display:flex;justify-content:center;align-items:center;z-index:10;
+  }
+  /* 2026-10-18: 固定宽度速度容器居中——2/3 位数中心不随位数变, 档位绝对定位在容器右缘外侧 */
+  .nb-speedwrap{position:relative;width:40vw}
+  .nb-speed{font-size:22vw;font-weight:400;line-height:0.8;letter-spacing:-0.6vw;width:100%;text-align:center}
+  .nb-meta{position:absolute;left:100%;margin-left:1.5vw;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:flex-start}
+  .nb-unit{font-size:2.29vw;font-weight:700;color:#777;letter-spacing:0.21vw;margin-bottom:0.83vw}
+  .nb-gear{
+    font-size:4vw;font-weight:700;color:#fff;
+    background:#1a1a1a;padding:0.42vw 2.08vw;
+    clip-path:polygon(10% 0,100% 0,90% 100%,0% 100%);
+    border-left:0.625vw solid #E1251B;
+  }
+  /* ── 底部: 左 FUEL/BAT/ODO · 右 RPM条/VOLT ── */
+  .nb-bottom{
+    position:absolute;bottom:5vh;left:3.33vw;right:3.33vw;
+    display:flex;justify-content:space-between;align-items:flex-end;z-index:10;
+  }
+  .nb-leftcol{display:flex;flex-direction:column;width:29.17vw}
+  .nb-energy{display:flex;flex-direction:column;margin-bottom:1.6vh}
+  .nb-energy:last-child{margin-bottom:0}
+  .nb-ehead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.8vh;line-height:1}
+  .nb-elbl{font-size:2.2vw;font-weight:700;color:#777;letter-spacing:0.21vw}
+  .nb-eval{font-size:3vw;font-weight:700;color:#fff}
+  .nb-eval.blue{color:#00A1E4}
+  .nb-etrack{
+    width:100%;height:6vh;background:#222;position:relative;
+    clip-path:polygon(0 0,100% 0,95% 100%,0% 100%);
+  }
+  .nb-efill{height:100%;position:absolute;top:0;left:0;background:#fff;transition:width 0.25s ease}
+  .nb-efill.blue{background:#00A1E4}
+  .nb-odotext{font-size:3vw;font-weight:700;color:#555;letter-spacing:0.21vw;margin-top:1.2vh;line-height:1}
+  .nb-odotext span{color:#888}
+  .nb-rightcol{display:flex;flex-direction:column;align-items:flex-end;width:33.33vw}
+  .nb-rpmhead{display:flex;justify-content:flex-end;align-items:baseline;width:100%;margin-bottom:1vh;line-height:1}
+  .nb-rpmlbl{font-size:2.2vw;font-weight:700;color:#777;letter-spacing:0.21vw;margin-right:1.67vw}
+  .nb-rpmval{font-size:3.75vw;font-weight:700;color:#fff;font-variant-numeric:tabular-nums}
+  .nb-gauges{
+    width:100%;height:3.5vh;background:#222;position:relative;
+    clip-path:polygon(5% 0,100% 0,100% 100%,0% 100%);
+    overflow:hidden;
+    margin-bottom:1.2vh;
+  }
+  .nb-grad{
+    position:absolute;top:0;left:0;width:100%;height:100%;
+    background:linear-gradient(90deg,#00A1E4 0%,#fff 60%,#E1251B 85%);
+  }
+  .nb-mask{
+    position:absolute;top:0;right:0;height:100%;
+    background:#222;width:100%;
+    transition:width 0.1s linear;
+  }
+  .nb-volt{font-size:2.2vw;font-weight:700;color:#555;letter-spacing:0.21vw;margin-top:1.2vh;line-height:1}
+  .nb-volt span{color:#888}
+  /* Theme B 下隐藏语音覆盖层（右下角会压 VOLT） */
+  body[data-theme="b"] .voice-mic{display:none}
+  body[data-theme="b"] .voice-overlay{display:none}
+  body[data-theme="c"] .voice-mic,body[data-theme="c"] .voice-overlay,
+  body[data-theme="d"] .voice-mic,body[data-theme="d"] .voice-overlay{display:none}
+
+  /* ═══════════ THEME C — ENERGY (能源管理台) 2026-10-17 ═══════════
+     左42%速度=第一眼; 右58%=状态pill+三行能源堆栈(12V/VEHICLE/FUEL, 粗分段条)
+     罗盘已移除(像A的根因), 航向降为页脚文字 */
+  .ui-c{display:none}
+  body[data-theme="c"] .ui-a,body[data-theme="c"] .ui-b{display:none}
+  body[data-theme="c"] .ui-c{
+    display:block;position:absolute;top:0;left:0;width:100vw;height:100vh;
+    background:#000;color:#fff;overflow:hidden;
+    font-family:'Odibee Sans','Courier New',monospace;
+    text-transform:uppercase;
+  }
+  .rc-left{position:absolute;left:7.5vw;top:10vh;bottom:18vh;width:33vw;display:flex;flex-direction:column;justify-content:center;gap:2.4vh}
+  /* 2026-10-18: 左列 33vw 内 26vw 固定宽容器居中(列中心 24vw), 档位绝对定位容器右缘外侧, 不压右列(48vw) */
+  .rc-speed{position:relative;display:block;width:26vw;margin:0 auto;line-height:0.76}
+  .rc-speed .n{font-size:22vw;letter-spacing:-0.8vw;text-align:center}
+  .rc-speed-meta{position:absolute;left:100%;margin-left:0.8vw;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:flex-start}
+  .rc-speed .u{font-size:2.4vw;color:#556677;letter-spacing:0.5vw;margin:0 0 0.6vh 0}
+  .rc-gear{font-size:4.2vw;line-height:1;
+    color:#fff;background:#161616;border-left:0.7vw solid #E1251B;padding:0.55vw 1.5vw;
+    letter-spacing:0.25vw}
+  .rc-rpm{width:100%}
+  .rc-rpm .head{display:flex;justify-content:space-between;align-items:baseline;font-size:2.2vw;color:#556677;letter-spacing:.4vw;margin-bottom:.6vh}
+  .rc-rpm .head b{font-size:3vw;color:#fff;font-weight:400}
+  .rc-rpm .track{width:100%;height:3.5vh;background:#0a1420;position:relative;overflow:hidden}
+  .rc-rpm .fill{height:100%;width:0;background-image:repeating-linear-gradient(90deg,#3399ff 0,#3399ff 1.2vw,transparent 1.2vw,transparent 1.45vw);transition:width .12s ease}
+  .rc-rpm .fill.hot{background-image:repeating-linear-gradient(90deg,#FF5722 0,#FF5722 1.2vw,transparent 1.2vw,transparent 1.45vw)}
+  .rc-rpm .redzone{position:absolute;right:0;top:0;height:100%;width:14.3%;background-image:repeating-linear-gradient(90deg,rgba(255,45,45,.55) 0,rgba(255,45,45,.55) 1.2vw,transparent 1.2vw,transparent 1.45vw)}
+  .rc-right{position:absolute;left:48vw;right:3.6vw;top:10vh;bottom:18vh;display:flex;flex-direction:column}
+  .rc-status{display:flex;flex-wrap:wrap;gap:0.8vw;margin-bottom:1.6vh}
+  .rc-pill{display:inline-flex;align-items:center;min-height:3.4vh;box-sizing:border-box;font-size:2.2vw;letter-spacing:0.25vw;padding:0.5vh 1.1vw;border:0.18vw solid #445566;color:#8fa3b8}
+  .rc-pill.on{color:#000;background:#3399ff;border-color:#3399ff}
+  .rc-pill.warn{color:#FF2D2D;border-color:#FF2D2D;animation:rc-warn 1.6s ease-in-out infinite}
+  .rc-rows{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;gap:0}
+  .rc-row .head{display:flex;align-items:baseline;margin-bottom:0.5vh}
+  .rc-row .lbl{font-size:2.2vw;color:#556677;letter-spacing:0.45vw}
+  .rc-row .val{font-size:4.6vw;line-height:1;font-variant-numeric:tabular-nums;margin-left:auto}
+  .rc-row .val.blue{color:#3399ff}
+  .rc-row .val.amber{color:#FF9800}
+  .rc-row .val.orange{color:#FF5722}
+  .rc-row .val.red{color:#FF2D2D}
+  .rc-bar{position:relative;height:6vh;background:#0a1420;overflow:hidden}
+  .rc-bar .fill{position:absolute;top:0;left:0;height:100%;width:0%;transition:width .25s ease;
+    background-image:repeating-linear-gradient(90deg,#3399ff 0,#3399ff 1.2vw,transparent 1.2vw,transparent 1.45vw)}
+  .rc-bar .fill.amber{background-image:repeating-linear-gradient(90deg,#FF9800 0,#FF9800 1.2vw,transparent 1.2vw,transparent 1.45vw)}
+  .rc-bar .fill.orange{background-image:repeating-linear-gradient(90deg,#FF5722 0,#FF5722 1.2vw,transparent 1.2vw,transparent 1.45vw)}
+  .rc-bar .fill.red{background-image:repeating-linear-gradient(90deg,#FF2D2D 0,#FF2D2D 1.2vw,transparent 1.2vw,transparent 1.45vw)}
+  .rc-row .sub{margin-top:0.4vh;min-height:2.6vh;font-size:2.2vw;color:#445566;letter-spacing:0.2vw;text-align:right}
+  .rc-row .sub.red{color:#FF2D2D}
+  @keyframes rc-warn{0%,100%{opacity:1}50%{opacity:0.45}}
+  .rc-foot{position:absolute;left:3.6vw;right:3.6vw;bottom:4.2vh;
+    display:flex;align-items:flex-end;justify-content:space-between;
+    border-top:0.16vw solid #101a26;padding-top:1.15vh}
+  .rc-cell{display:flex;flex-direction:column}
+  .rc-cell .k{font-size:2.2vw;color:#38485a;letter-spacing:0.4vw;margin-bottom:0.35vh}
+  .rc-cell .val{font-size:3.2vw;color:#8fa3b8;line-height:1;font-variant-numeric:tabular-nums}
+  .rc-cell .val.amber{color:#FF9800}
+  .rc-cell .val.blue{color:#4FC3F7}
+  .rc-cell.right{text-align:right}
+
+  /* ═══════════ THEME D — NIGHT 航空夜航表盘 (2026-10-17 r2) ═══════════
+     研究结论: 航空 HUD = 单色琥珀+中央固定速度, 告警红。夜航只留最小集:
+     速度/档位 + 顶角航向/时钟 + 底部一条低亮度电力轨(12V BUS+Vehicle+净W)。
+     砍掉: 油量/续航/ODO/CONS/坡度/罗盘带/语音波形。 */
+  .ui-d{display:none}
+  body[data-theme="d"] .ui-a,body[data-theme="d"] .ui-b,body[data-theme="d"] .ui-c{display:none}
+  body[data-theme="d"] .ui-d{
+    display:block;position:absolute;top:0;left:0;width:100vw;height:100vh;
+    background:#000;color:#FF9800;overflow:hidden;
+    font-family:'Odibee Sans','Courier New',monospace;text-transform:uppercase;
+  }
+  .rd-cp{position:absolute;left:3.5vw;top:3.2vh;font-size:2.6vw;color:#8a5a00;letter-spacing:0.35vw}
+  .rd-time{position:absolute;right:3.5vw;top:3.2vh;font-size:2.6vw;color:#6b4700;letter-spacing:0.3vw}
+  .rd-center{position:absolute;top:43%;left:0;width:100%;transform:translateY(-50%);
+    display:flex;align-items:center;justify-content:center}
+  /* 2026-10-18: 固定宽 42vw 速度容器居中(屏幕中心), 档位绝对定位右缘 +1.5vw, 不随位数移动 */
+  .rd-speedwrap{position:relative;width:42vw}
+  .rd-speed{font-size:26vw;line-height:0.8;letter-spacing:-0.9vw;color:#FF9800;
+    text-shadow:0 0 2.2vw rgba(255,152,0,0.16);width:100%;text-align:center}
+  .rd-meta{position:absolute;left:100%;margin-left:1.5vw;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:flex-start}
+  .rd-unit{font-size:2.4vw;color:#8a5a00;letter-spacing:0.55vw;margin-bottom:1.1vh}
+  .rd-gear{font-size:4.1vw;line-height:1;color:#FF9800;border:0.28vw solid rgba(255,152,0,0.65);
+    padding:0.35vw 1.4vw;letter-spacing:0.25vw}
+  /* ── 转速指示: 速度下方居中, opacity 0.8, 琥珀分段条 0–7000, >6000 转红 ── */
+  .rd-rpm{position:absolute;top:auto;bottom:21vh;left:50%;transform:translateX(-50%);width:34vw;opacity:0.8}
+  .rd-rpm .head{display:flex;justify-content:space-between;align-items:baseline;
+    font-size:2.2vw;color:#8a5a00;letter-spacing:0.3vw;margin-bottom:0.6vh}
+  .rd-rpm .head b{font-weight:400;font-size:3.2vw;color:#FF9800;letter-spacing:0.1vw}
+  .rd-rpm .track{position:relative;height:3.5vh;background:#231400;overflow:hidden}
+  .rd-rpm .fill{position:absolute;left:0;top:0;bottom:0;width:0%;
+    background:repeating-linear-gradient(90deg,#FF9800 0,#FF9800 1vw,transparent 1vw,transparent 1.22vw)}
+  .rd-rpm .fill.hot{background:repeating-linear-gradient(90deg,#FF3B30 0,#FF3B30 1vw,transparent 1vw,transparent 1.22vw)}
+  .rd-rpm .redzone{position:absolute;right:0;top:0;bottom:0;width:14.3%;
+    background:repeating-linear-gradient(90deg,rgba(255,59,48,.55) 0,rgba(255,59,48,.55) 1vw,transparent 1vw,transparent 1.22vw)}
+  /* ── 底部电力轨: 整体 opacity 0.55, 两行(数字行+分段条) ── */
+  .rd-rail{position:absolute;left:6vw;right:6vw;bottom:3.4vh;opacity:0.55}
+  .rd-r1{display:flex;align-items:baseline;gap:2.6vw;font-size:2.2vw;color:#8a5a00;
+    letter-spacing:0.25vw;margin-bottom:0.9vh;white-space:nowrap}
+  .rd-r1 b{font-weight:400;font-size:2.6vw;color:#FF9800;letter-spacing:0.1vw;margin-left:0.7vw}
+  .rd-r1 .rd-net{margin-left:auto}
+  .rd-r1 .rd-net i{font-style:normal;margin-left:0.5vw}
+  .rd-r2{display:flex;align-items:center;gap:1.6vw}
+  .rd-mini{flex:1;display:flex;gap:0.2vw}
+  .rd-seg{flex:1 1 0;height:3.5vh;background:#241500}
+  .rd-seg.on{background:#FF9800}
+  .rd-tag{font-size:2.2vw;color:#5c3d00;letter-spacing:0.2vw;min-width:5.2vw}
+  /* 告警: 轨转红 + 低频 pulse (1.6s) */
+  .ui-d.low .rd-rail{animation:rdpulse 1.6s ease-in-out infinite}
+  .ui-d.low .rd-rail b,.ui-d.low .rd-seg.on{color:#FF3B30;background:#FF3B30}
+  .ui-d.low .rd-rail b{background:none}
+  .ui-d.low .rd-alert{color:#FF3B30}
+  @keyframes rdpulse{0%,100%{opacity:0.55}50%{opacity:0.22}}
+</style>
+</head>
+<body data-theme="a">
+<div class="hud ui-a">
+
+  <!-- Row 1: Compass -->
+  <div class="compass-box">
+    <div class="compass-strip" id="compStrip"></div>
+    <div class="compass-indicator"></div>
+  </div>
+
+  <!-- Row 2 left: Speed + Gear -->
+  <div class="speed-box">
+    <span class="speed-num" id="speedNum">--</span>
+    <div class="speed-right">
+      <span class="speed-unit">KM/H</span>
+      <div class="gear-box" id="gearBox">N</div>
+    </div>
+  </div>
+
+  <!-- Row 2 right: RPM horizontal -->
+  <div class="rpm-box">
+    <div class="rpm-label">RPM</div>
+    <div class="rpm-bar-bg">
+      <div class="rpm-bar-fill" id="rpmFill" style="width:0%"></div>
+    </div>
+    <div class="rpm-bot">
+      <div class="conn-st">
+        <div class="wifi-svg on" id="wifiIcon">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 21c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm4-6.5c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2s.9 2 2 2h4c1.1 0 2-.9 2-2zm3.5-5.5c0-1.1-.9-2-2-2h-11c-1.1 0-2 .9-2 2s.9 2 2 2h11c1.1 0 2-.9 2-2z"/>
+          </svg>
+        </div>
+        <div class="pi-tag off" id="piTag">PI</div>
+        <div class="pi-tag ac-tag off" id="acTag">AC</div>
+      </div>
+      <span class="rpm-number" id="rpmNum">-- <span class="rpm-unit">RPM</span></span>
+    </div>
+  </div>
+
+  <!-- Row 3 -->
+  <div class="bottom-row">
+    <div class="b-left">
+      <div class="alt-slope-row">
+        <span class="as-lbl">ALT</span>
+        <span class="alt-val" id="altVal">--</span>
+        <span class="as-sep"></span>
+        <span id="slopeIcon">→</span>
+        <span class="slope-val" id="slopeVal">--</span>
+      </div>
+      <span class="odo" id="odoNum">--</span>
+      <span class="odo-l">KM</span>
+    </div>
+
+    <div class="b-center">
+      <div class="b-item">
+        <span class="lbl">FUEL</span>
+        <div class="bar-bg"><div class="bar-fill og" id="fuelBar" style="width:0%"></div></div>
+        <span class="val" id="fuelVal">--</span>
+      </div>
+      <div class="b-item">
+        <span class="lbl">BAT</span>
+        <div class="bar-bg"><div class="bar-fill bl" id="powerBar" style="width:0%"></div></div>
+        <span class="val" id="voltVal">--</span>
+      </div>
+    </div>
+
+    <div class="b-mid">
+      <div class="m-row"><span class="m-lbl">V</span> <span class="m-val" id="voltNum">--</span></div>
+      <div class="m-row"><span class="m-lbl">EH</span> <span class="m-val" id="engHrsVal">--</span></div>
+      <div class="m-row"><span class="m-lbl">IN</span> <span class="m-val" id="inPowVal">--</span></div>
+      <div class="m-row"><span class="m-lbl">OUT</span> <span class="m-val" id="outPowVal">--</span></div>
+      <div class="m-row" style="grid-column:1/-1"><span class="m-lbl">SRV</span> <span class="m-val" id="srvKmVal">--</span></div>
+    </div>
+
+    <div class="b-right">
+      <div class="co2-wrap">
+        <div class="co2-bar-bg"><div class="co2-bar-fill" id="co2Bar" style="width:0%"></div></div>
+        <span class="co2-val" id="co2Val">--</span>
+        <span class="pres-dot" id="presDot"></span>
+      </div>
+      <span class="t" id="clockT">--:--</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════ THEME B2 — 纯黑+ODO (2026-08-23, 遥控器左右键切换) ══════ -->
+<div class="ui-b" id="uiB">
+  <div class="nb-header">
+    <div class="nb-left">
+      <div class="nb-power">
+        <svg viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" fill="none"><rect x="4" y="8" width="16" height="11" rx="1.5"/><path d="M8 8V5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v3"/><circle cx="9" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="15" cy="14" r="1" fill="currentColor" stroke="none"/></svg>
+        <span id="npw">-- W</span>
+      </div>
+      <div class="nb-sys"><span class="dot" id="npi"></span> PI <span class="dot" id="nnan"></span> NANO</div>
+    </div>
+    <div class="nb-compass" id="ncp">--</div>
+    <div class="nb-time"><span id="ntime">--:--</span><div class="nb-co2row"><div class="nb-co2"><div class="nb-co2-fill" id="nco2b"></div></div><span class="nb-pd" id="npd"></span></div></div>
+  </div>
+
+  <div class="nb-center">
+    <div class="nb-speedwrap">
+      <div class="nb-speed" id="nsp">--</div>
+      <div class="nb-meta">
+        <div class="nb-unit">KM/H</div>
+        <div class="nb-gear" id="ngr">N</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nb-bottom">
+    <div class="nb-leftcol">
+      <div class="nb-energy">
+        <div class="nb-ehead"><span class="nb-elbl">FUE</span><span class="nb-eval" id="nfv">--</span></div>
+        <div class="nb-etrack"><div class="nb-efill" id="nff" style="width:0%"></div></div>
+      </div>
+      <div class="nb-energy">
+        <div class="nb-ehead"><span class="nb-elbl">BAT</span><span class="nb-eval blue" id="nbv">--</span></div>
+        <div class="nb-etrack"><div class="nb-efill blue" id="nbf" style="width:0%"></div></div>
+      </div>
+      <div class="nb-odotext">ODO <span id="nod">--</span></div>
+    </div>
+
+    <div class="nb-rightcol">
+      <div class="nb-rpmhead"><span class="nb-rpmlbl">ENGINE RPM</span><span class="nb-rpmval" id="nrv">--</span></div>
+      <div class="nb-gauges">
+        <div class="nb-grad"></div>
+        <div class="nb-mask" id="nrm"></div>
+      </div>
+      <div class="nb-volt">VOLT <span id="nvt">--</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════ THEME C — ENERGY (能源管理台) ══════ -->
+<div class="ui-c" id="uiC">
+  <div class="rc-left">
+    <div class="rc-speed">
+      <div class="n" id="rcSpeed">--</div>
+      <div class="rc-speed-meta">
+        <div class="u">KM/H</div>
+        <div class="rc-gear" id="rcGear">N</div>
+      </div>
+    </div>
+    <div class="rc-rpm"><div class="head"><span>RPM</span><b id="rcRpmNum">--</b></div><div class="track"><div class="fill" id="rcRpmFill"></div><div class="redzone"></div></div></div>
+  </div>
+  <div class="rc-right">
+    <div class="rc-status">
+      <span class="rc-pill" id="rcPillMode">STANDBY</span>
+      <span class="rc-pill" id="rcPillNet">--</span>
+      <span class="rc-pill warn" id="rcPillWarnV" style="display:none">LOW VOLTAGE</span>
+      <span class="rc-pill warn" id="rcPillWarnS" style="display:none">LOW VEHICLE</span>
+    </div>
+    <div class="rc-rows">
+      <div class="rc-row">
+        <div class="head"><span class="lbl">12V BUS</span><span class="val blue" id="rcVolt">--</span></div>
+        <div class="rc-bar"><div class="fill" id="rcVoltBar"></div></div>
+        <div class="sub" id="rcVoltSub"></div>
+      </div>
+      <div class="rc-row">
+        <div class="head"><span class="lbl">VEHICLE</span><span class="val amber" id="rcStation">--</span></div>
+        <div class="rc-bar"><div class="fill amber" id="rcStationBar"></div></div>
+        <div class="sub" id="rcFlow">--</div>
+      </div>
+      <div class="rc-row">
+        <div class="head"><span class="lbl">FUEL</span><span class="val orange" id="rcFuel">--</span></div>
+        <div class="rc-bar"><div class="fill orange" id="rcFuelBar"></div></div>
+        <div class="sub" id="rcRange">RANGE -- KM</div>
+      </div>
+    </div>
+  </div>
+  <div class="rc-foot">
+    <div class="rc-cell"><span class="k">ODO</span><span class="val" id="rcOdo">--</span></div>
+    <div class="rc-cell"><span class="k">CONS</span><span class="val" id="rcCons">--</span></div>
+    <div class="rc-cell"><span class="k">ALT</span><span class="val" id="rcAlt">--</span></div>
+    <div class="rc-cell"><span class="k">SLOPE</span><span class="val" id="rcSlope">--</span></div>
+    <div class="rc-cell"><span class="k">HDG</span><span class="val" id="rcHdg">--</span></div>
+    <div class="rc-cell right"><span class="k">TIME</span><span class="val" id="rcTime">--:--</span></div>
+  </div>
+</div>
+
+<!-- ══════ THEME D — NIGHT 航空夜航表盘 (r2) ══════ -->
+<div class="ui-d" id="uiD">
+  <div class="rd-cp" id="rdCp">--</div>
+  <div class="rd-time" id="rdTime">--:--</div>
+  <div class="rd-center">
+    <div class="rd-speedwrap">
+      <div class="rd-speed" id="rdSpeed">--</div>
+      <div class="rd-meta">
+        <div class="rd-unit">KM/H</div>
+        <div class="rd-gear" id="rdGear">N</div>
+      </div>
+    </div>
+  </div>
+  <div class="rd-rpm"><div class="head"><span>RPM</span><b id="rdRpmNum">--</b></div><div class="track"><div class="fill" id="rdRpmFill"></div><div class="redzone"></div></div></div>
+  <div class="rd-rail">
+    <div class="rd-r1">
+      <span>12V BUS<b id="rdBus">--.-</b>V</span>
+      <span>VEHICLE<b id="rdSta">--%</b></span>
+      <span class="rd-net" id="rdNet">--W</span>
+      <span class="rd-alert" id="rdAlert"></span>
+    </div>
+    <div class="rd-r2">
+      <span class="rd-tag">BUS</span>
+      <div class="rd-mini" id="rdBusBar"></div>
+      <span class="rd-tag">VEH</span>
+      <div class="rd-mini" id="rdStaBar"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Voice overlay: wave animation -->
+<div class="voice-mic" id="voiceMic">
+  <svg viewBox="0 0 24 24" fill="#66bbff">
+    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z"/>
+    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+  </svg>
+</div>
+
+<div class="voice-overlay" id="voiceOverlay">
+  <div class="v-bar" style="height:0.3vw"></div>
+  <div class="v-bar" style="height:0.6vw"></div>
+  <div class="v-bar" style="height:1.0vw"></div>
+  <div class="v-bar" style="height:1.4vw"></div>
+  <div class="v-bar" style="height:1.8vw"></div>
+  <div class="v-bar" style="height:1.4vw"></div>
+  <div class="v-bar" style="height:1.0vw"></div>
+  <div class="v-bar" style="height:0.6vw"></div>
+  <div class="v-bar" style="height:0.3vw"></div>
+  <span class="v-text" id="voiceText">嘿Vox?</span>
+</div>
+
+<script>
+const st={speed:-1,rpm:-1,engineLoad:-1,throttlePos:-1,voltage:-1,power:-1,chargePower:-1,dischargePower:-1,miniPower:-1,miniChargePower:-1,sdcVoltage:-1,fuelCons:-1,fuelLevel:-1,odo:-1,heading:-1,gear:0,engHrs:-1,srvKm:-1,co2:-1,presence:-1,voiceState:'idle',voiceText:'',nanoOn:false,acOn:-1};
+
+// ── Theme A/B switching (遥控器左右键, MainActivity dispatchKeyEvent → switchTheme) ──
+const THEME_KEY='hud_theme_v2';
+const THEMES=['a','b','c','d'];
+let theme='a';
+function applyTheme(t){
+  theme=t;
+  document.body.setAttribute('data-theme',t);
+  try{localStorage.setItem(THEME_KEY,t)}catch(e){}
+}
+function switchTheme(dir){
+  let i=THEMES.indexOf(theme)+dir;
+  if(i<0)i=THEMES.length-1;
+  if(i>=THEMES.length)i=0;
+  applyTheme(THEMES[i]);
+  requestDraw();
+  return theme;
+}
+(function(){
+  try{
+    const saved=localStorage.getItem(THEME_KEY);
+    if(THEMES.indexOf(saved)>=0)theme=saved;
+  }catch(e){}
+  applyTheme(theme);
+})();
+
+// ── Continuous compass — scales and direction labels ──
+const DEG_PX=6;           // pixels per degree on strip
+const EXTRA=360;           // extra degrees past 0/360 to fill scroll buffer
+const STRIP_DEG=360+EXTRA*2; // 1080° total on strip
+const STRIP_PX=STRIP_DEG*DEG_PX;
+
+let displayHdg=-1;        // frame-interpolated
+let targetHdg=-1;          // latest sensor value
+const HDG_LERP=0.25;       // per-frame lerp (10fps → ~25%/frame ≈ ~300ms settle)
+
+// ── RPM smooth interpolation ──
+let displayRpm=-1;
+let targetRpm=-1;
+const RPM_LERP=0.4;        // per-frame lerp (10fps → ~40%/frame ≈ ~300ms settle)
+
+// CO₂ 渲染缓存 (draw 计算, renderThemeB 复用)
+const CO2={pct:0,col:'#445566'};
+
+const D={
+  sn:document.getElementById('speedNum'),
+  rf:document.getElementById('rpmFill'),
+  rn:document.getElementById('rpmNum'),
+  gb:document.getElementById('gearBox'),
+  pb:document.getElementById('powerBar'),
+  mb:document.getElementById('miniBar'),
+  mv:document.getElementById('miniVal'),
+  fb:document.getElementById('fuelBar'),
+  vv:document.getElementById('voltVal'),
+  fv:document.getElementById('fuelVal'),
+  vn:document.getElementById('voltNum'),
+  ip:document.getElementById('inPowVal'),
+  op:document.getElementById('outPowVal'),
+  on:document.getElementById('odoNum'),
+  eh:document.getElementById('engHrsVal'),
+  sk:document.getElementById('srvKmVal'),
+  ct:document.getElementById('clockT'),
+  cs:document.getElementById('compStrip'),
+  wi:document.getElementById('wifiIcon'),
+  pt:document.getElementById('piTag'),
+  at:document.getElementById('acTag'),
+  nn:document.getElementById('nanoTag'),
+  av:document.getElementById('altVal'),
+  sv:document.getElementById('slopeVal'),
+  si:document.getElementById('slopeIcon'),
+  sb:document.getElementById('slopeBox') || {textContent:'',className:''},
+  // Theme B (Pure Black + ODO)
+  npw:document.getElementById('npw'),
+  npi:document.getElementById('npi'),
+  nnan:document.getElementById('nnan'),
+  ncp:document.getElementById('ncp'),
+  nt:document.getElementById('ntime'),
+  nsp:document.getElementById('nsp'),
+  ngr:document.getElementById('ngr'),
+  nfv:document.getElementById('nfv'),
+  nff:document.getElementById('nff'),
+  nbv:document.getElementById('nbv'),
+  nbf:document.getElementById('nbf'),
+  nod:document.getElementById('nod'),
+  nrv:document.getElementById('nrv'),
+  nrm:document.getElementById('nrm'),
+  nvt:document.getElementById('nvt'),
+  // CO₂ 条 + 人体存在 (2026-10-17) Theme A/B
+  co2b:document.getElementById('co2Bar'),
+  co2v:document.getElementById('co2Val'),
+  pd:document.getElementById('presDot'),
+  nco2b:document.getElementById('nco2b'),
+  npd:document.getElementById('npd'),
+  // Theme C — ENERGY
+  csp:document.getElementById('rcSpeed'),
+  cgr:document.getElementById('rcGear'),
+  rcRpmNum:document.getElementById('rcRpmNum'),
+  rcRpmFill:document.getElementById('rcRpmFill'),
+  cpm:document.getElementById('rcPillMode'),
+  cpn:document.getElementById('rcPillNet'),
+  cpw:document.getElementById('rcPillWarnV'),
+  cws:document.getElementById('rcPillWarnS'),
+  cvv:document.getElementById('rcVolt'),
+  cvb:document.getElementById('rcVoltBar'),
+  cvs:document.getElementById('rcVoltSub'),
+  csv:document.getElementById('rcStation'),
+  csb:document.getElementById('rcStationBar'),
+  csf:document.getElementById('rcFlow'),
+  cfv:document.getElementById('rcFuel'),
+  cfb:document.getElementById('rcFuelBar'),
+  crg:document.getElementById('rcRange'),
+  ccons:document.getElementById('rcCons'),
+  calt:document.getElementById('rcAlt'),
+  cslp:document.getElementById('rcSlope'),
+  chdg:document.getElementById('rcHdg'),
+  codo:document.getElementById('rcOdo'),
+  ctim:document.getElementById('rcTime'),
+  // Theme D — NIGHT
+  dsp:document.getElementById('rdSpeed'),
+  drpm:document.getElementById('rdRpmNum'),
+  drpf:document.getElementById('rdRpmFill'),
+  dgr:document.getElementById('rdGear'),
+  dcp:document.getElementById('rdCp'),
+  dtim:document.getElementById('rdTime'),
+  drg:document.getElementById('rdRange'),
+  dbus:document.getElementById('rdBus'),
+  dst:document.getElementById('rdSta'),
+  dnet:document.getElementById('rdNet'),
+  dbb:document.getElementById('rdBusBar'),
+  dsb:document.getElementById('rdStaBar'),
+  dal:document.getElementById('rdAlert'),
+};
+
+// ── Build continuous scale strip (ticks + degree + Chinese direction labels) ──
+const CARD_CN={0:'北',45:'东北',90:'东',135:'东南',180:'南',225:'西南',270:'西',315:'西北'};
+
+function buildCompassStrip(el){
+  el=el||D.cs;
+  if(!el)return;
+  const items=[];
+  const start=-EXTRA,end=360+EXTRA;
+  for(let d=start;d<=end;d+=5){
+    const norm=((d%360)+360)%360;
+    const x=(d-start)/STRIP_DEG*100;
+    const is90=d%90===0,is45=d%45===0&&!is90;
+    const is30=d%30===0&&!is45&&!is90;
+    const is10=d%10===0&&!is30&&!is45&&!is90;
+    const is5=d%5===0&&!is10&&!is30&&!is45&&!is90;
+    // Tick height: flatter scale
+    const h=is90?'40%':is45?'32%':is30?'25%':is10?'16%':'10%';
+    const c=is90?'rgba(150,190,230,0.55)':is45?'rgba(100,150,200,0.45)':
+            is30?'rgba(70,110,160,0.35)':
+            is10?'rgba(40,70,110,0.25)':'rgba(20,40,70,0.18)';
+    items.push('<div class="ct" style="left:'+x+'%;height:'+h+';background:'+c+'"></div>');
+    // Chinese direction labels at 45° intervals
+    if(is90||is45){
+      items.push('<div class="ct-lbl" style="left:'+x+'%">'+CARD_CN[norm]+'</div>');
+    }
+    // Degree numbers at 30° intervals
+    if(is30||is90||is45){
+      items.push('<div class="ct-deg" style="left:'+x+'%">'+norm+'°</div>');
+    }
+  }
+  el.innerHTML=items.join('');
+  el.style.width=STRIP_PX+'px';
+}
+buildCompassStrip();
+buildCompassStrip(D.ccs);
+
+function lerpAngle(from,to,t){
+  let d=to-from;
+  while(d>180)d-=360;
+  while(d<-180)d+=360;
+  return from+d*t;
+}
+
+// ── Render compass: slide strip so current heading aligns under indicator ──
+function drawCompass(hdg){drawCompassInto(D.cs,hdg);}
+function drawCompassInto(el,hdg){
+  if(!el||hdg<0)return;
+  const box=el.parentElement;
+  const boxW=(box&&box.getBoundingClientRect().width)||window.innerWidth;
+  const centerPx=boxW/2;
+  // heading's position on the strip (px from strip left edge)
+  const hdgPx=(hdg+EXTRA)/STRIP_DEG*STRIP_PX;
+  // translate so heading aligns under center of visible box
+  const tx=centerPx-hdgPx;
+  el.style.transform='translate3d('+tx+'px,0,0)';
+}
+
+function draw(){
+  const s=st;
+  D.sn.textContent=s.speed>=0?String(Math.round(s.speed)):'--';
+  D.gb.textContent=s.speed>=0&&s.rpm>=0?(function(){
+    if(s.speed<1||s.rpm<100)return'N';
+    // XT5 9T50 final 3.47 tire 235/65R18: speed-per-1000RPM by gear
+    const ra=s.speed/(s.rpm/1000),tt=[0,12.5,13.8,16.9,21.6,28.7,41.4,55.5,67.2,999];
+    for(let g=1;g<=9;g++)if(ra<tt[g])return String(g);
+    return'9';
+  })():'N';
+
+  // RPM horizontal bar — CSS transition smooths (no per-frame lerp needed)
+  const rp=targetRpm>=0?Math.min(targetRpm/7000*100,100):0;
+  D.rf.style.width=rp+'%';
+  const showRpm=Math.round(targetRpm);
+  D.rn.innerHTML=showRpm>=0?String(showRpm)+' <span class="rpm-unit">RPM</span>':'-- <span class="rpm-unit">RPM</span>';
+
+  // Bars —— 2026-09-29: 单条电量 = 两机合计能量 / 3kWh (由 HudService 算好)
+  const pp=s.power>=0?Math.min(100,s.power):0;
+  D.pb.style.width=pp+'%';
+  D.vv.textContent=s.power>=0?Math.round(s.power)+'%':'--';
+  const fp=s.fuelLevel>=0?Math.min(100,s.fuelLevel):0;
+  D.fb.style.width=fp+'%';
+  D.fb.className='bar-fill '+(fp<15?'bl':'og');
+  D.fv.textContent=s.fuelLevel>=0?Math.round(s.fuelLevel)+'%':'--';
+
+  // Voltage —— 2026-09-29: 改显 2000E 的 SDC(车12V)电压, OBD 不准
+  if(s.sdcVoltage>=0){
+    D.vn.textContent=s.sdcVoltage.toFixed(1)+'V';
+  }else{
+    D.vn.textContent=s.voltage>=0?s.voltage.toFixed(1)+'V':'--';
+  }
+  // Outdoor power IN/OUT (W)
+  D.ip.textContent=s.chargePower>=0?Math.round(s.chargePower)+'W':'--';
+  D.op.textContent=s.dischargePower>=0?Math.round(s.dischargePower)+'W':'--';
+
+  // Odometer
+  D.on.textContent=s.odo>=0?s.odo.toFixed(1):'--';
+
+  // Engine hours since service
+  if(s.engHrs>=0){
+    D.eh.textContent=s.engHrs>=100?Math.round(s.engHrs)+'h':s.engHrs.toFixed(1)+'h';
+  }else{D.eh.textContent='--'}
+
+  // Service km
+  if(D.sk) D.sk.textContent=s.srvKm>=0?Math.round(s.srvKm).toLocaleString()+'km':'--';
+
+  // Connection status icons
+  if(D.wi) D.wi.className='wifi-svg'+(s.wifiOn?' on':'');
+  if(D.pt) D.pt.className='pi-tag'+(s.piOn?'':' off');
+  if(D.at) D.at.className='pi-tag ac-tag'+(s.acOn===1?'':' off');
+  if(D.nn) D.nn.className='nano-tag'+(s.nanoOn?'':' off');
+
+  // Altitude
+  if(D.av)D.av.textContent=s.altitude>=0?Math.round(s.altitude):'--';
+
+  // CO₂ 浓度条 + 人体存在 (2026-10-17) — 400→5000ppm 映射宽度，绿→红
+  CO2.pct=s.co2>=0?Math.max(0,Math.min(100,s.co2/2100*100)):0;
+  // 2026-10-17 满量程 2100ppm（0→满条）; 分级: ≤800 绿 / 1400 黄 / ≥2000 红
+  const sev=s.co2>=0?Math.max(0,Math.min(1,(s.co2-800)/1200)):0;
+  CO2.col=s.co2>=0?(s.co2>=2000?'#FF2D2D':'hsl('+Math.round(120*(1-sev))+',90%,50%)'):'#445566';
+  if(D.co2b){D.co2b.style.width=CO2.pct+'%';D.co2b.style.background=CO2.col;}
+  if(D.co2v)D.co2v.textContent=s.co2>=0?String(Math.round(s.co2)):'--';
+  if(D.pd)D.pd.className='pres-dot'+(s.presence===1?' on':'');
+
+  // Slope — sentinel is -1, allow negative values
+  if(s.slope!==-1 && s.slope!==undefined && D.sv && D.si){
+    const absSlp=Math.abs(s.slope);
+    const sVal=absSlp<0.3?'0':absSlp<10?absSlp.toFixed(1):Math.round(absSlp);
+    D.sv.textContent=sVal;
+    if(absSlp<0.5){
+      D.sv.className='slope-val flat';
+      D.si.textContent='→';
+    }else if(s.slope>0){
+      D.sv.className='slope-val climb';
+      D.si.textContent='↗';
+    }else{
+      D.sv.className='slope-val descent';
+      D.si.textContent='↘';
+    }
+  }else if(D.sv && D.si){
+    D.sv.textContent='--';
+    D.sv.className='slope-val';
+    D.si.textContent='→';
+  }
+  
+  // Voice overlay
+  const vs=s.voiceState||'idle';
+  const vt=s.voiceText||'';
+  const vo=VOICE.vo;
+  const vm=VOICE.vm;
+  const vtEl=VOICE.vt;
+  
+  if(vs==='idle'){
+    vo.classList.remove('active','speaking','processing');
+    vm.classList.remove('listening');
+  }else{
+    vo.classList.add('active');
+    vo.classList.remove('speaking','processing');
+    vm.classList.add('listening');
+    
+    if(vs==='waking'||vs==='listening'){
+      // Wave animation active (listening)
+    }else if(vs==='processing'){
+      vo.classList.add('processing');
+    }else if(vs==='speaking'){
+      vo.classList.add('speaking');
+    }
+    
+    // Update text
+    const labels={waking:'嘿Vox?',listening:'聆听中...',processing:'思考中...',speaking:vt||'播报中...'};
+    vtEl.textContent=labels[vs]||vs;
+    // Ensure wave animation is running while voice overlay is active
+    if(!waveRunning){ waveRunning=true; animateWave(); }
+  }
+
+  // Compass — CSS transition smooths; no per-frame lerp
+  if(targetHdg>=0) drawCompass(targetHdg);
+
+  // ── Theme B (Sport v2) — 数据驱动渲染 + 自停 rAF 平滑 ──
+  if(theme==='b')renderThemeB();
+  if(theme==='c')renderThemeC();
+  if(theme==='d')renderThemeD();
+}
+
+// ══ Theme B (Pure Black + ODO) 渲染引擎 — 数据驱动 + CSS transition 平滑（无 rAF，防 CPU 峰值）══
+function calcGear(speed,rpm){
+  if(speed<1||rpm<100)return'N';
+  const ra=speed/(rpm/1000),tt=[0,12.5,13.8,16.9,21.6,28.7,41.4,55.5,67.2,999];
+  for(let g=1;g<=9;g++)if(ra<tt[g])return String(g);
+  return'9';
+}
+function renderThemeB(){
+  const s=st;
+  // 左上角电源输入功率 (HA sensor.cadillac_charge_power, HudService 每5s拉取)
+  if(D.npw)D.npw.textContent=(s.chargePower>=0?Math.round(s.chargePower):'--')+' W';
+  // PI/NANO 状态点
+  if(D.npi)D.npi.className='dot'+(s.piOn?' on':'');
+  if(D.nnan)D.nnan.className='dot'+(s.nanoOn?' on':'');
+  // 中央时速 + 档位
+  if(D.nsp)D.nsp.textContent=s.speed>=0?String(Math.round(s.speed)):'--';
+  if(D.ngr)D.ngr.textContent=s.speed>=0&&s.rpm>=0?'D'+calcGear(s.speed,s.rpm):'N';
+  // 罗盘: 方向 + 角度 (GPS bearing)
+  if(s.heading>=0&&D.ncp){
+    const hdg=Math.round(s.heading)%360;
+    D.ncp.textContent=(CARD_CN[((Math.round(hdg/45)*45)%360+360)%360]||'')+' '+hdg+'°';
+  }else if(D.ncp)D.ncp.textContent='--';
+  // FUEL (AIOBD 剩余油量)
+  if(s.fuelLevel>=0){
+    if(D.nfv)D.nfv.textContent=Math.round(s.fuelLevel)+'%';
+    if(D.nff)D.nff.style.width=Math.min(100,s.fuelLevel)+'%';
+  }else if(D.nfv)D.nfv.textContent='--';
+  // BAT (车辆电池总电量%, HA sensor.vehicle_battery_total, 2026-10-18 起)
+  if(s.power>=0){
+    if(D.nbv)D.nbv.textContent=Math.round(s.power)+'%';
+    if(D.nbf)D.nbf.style.width=Math.min(100,s.power)+'%';
+  }else if(D.nbv)D.nbv.textContent='--';
+  // ODO (hud-odo 校准里程)
+  if(D.nod)D.nod.textContent=s.odo>=0?s.odo.toFixed(1)+' KM':'--';
+  // CO₂ 条 + 人体存在 (2026-10-17, 由 draw() 计算好)
+  if(D.nco2b){D.nco2b.style.width=CO2.pct+'%';D.nco2b.style.background=CO2.col;}
+  if(D.npd)D.npd.className='nb-pd'+(s.presence===1?' on':'');
+  // ENGINE RPM + 渐变条 (遮罩式, 7000 满量程)
+  if(s.rpm>=0){
+    if(D.nrv)D.nrv.textContent=String(Math.round(s.rpm));
+    if(D.nrm){
+      const pct=Math.min(100,Math.max(0,(s.rpm/7000)*100));
+      D.nrm.style.width=(100-pct)+'%';
+    }
+  }else if(D.nrv)D.nrv.textContent='--';
+  // VOLT (AIOBD 电瓶电压)
+  if(D.nvt)D.nvt.textContent=s.voltage>=0?s.voltage.toFixed(1)+' V':'--';
+  // 时钟（每次数据刷新同步，10s interval 兑底）
+  const nb=new Date();
+  if(D.nt)D.nt.textContent=String(nb.getHours()).padStart(2,'0')+':'+String(nb.getMinutes()).padStart(2,'0');
+}
+function tbEnsureAnim(){renderThemeB();}
+
+// ══ Theme C — ROAD 渲染引擎 ══
+// 续航 = 油量% × 油箱(82L) ÷ 百公里油耗; 油耗缺失时按 9.5 L/100km 估
+const TANK_L=82, CONS_FALLBACK=9.5;
+function calcRange(){
+  if(st.fuelLevel<0)return -1;
+  const cons=(st.fuelCons>0.5&&st.fuelCons<40)?st.fuelCons:CONS_FALLBACK;
+  return st.fuelLevel/100*TANK_L*100/cons;
+}
+function hhmm(){const n=new Date();return String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');}
+
+function renderThemeC(){
+  const s=st;
+  if(D.csp)D.csp.textContent=s.speed>=0?String(Math.round(s.speed)):'--';
+  if(D.cgr)D.cgr.textContent=(s.speed>=0&&s.rpm>=0)?'D'+calcGear(s.speed,s.rpm):'N';
+  if(D.rcRpmNum&&D.rcRpmFill){
+    if(s.rpm>=0){
+      D.rcRpmNum.textContent=String(Math.round(s.rpm));
+      D.rcRpmFill.style.width=Math.min(100,s.rpm/7000*100).toFixed(2)+'%';
+      D.rcRpmFill.className='fill'+(s.rpm>6000?' hot':'');
+    }else{D.rcRpmNum.textContent='--';D.rcRpmFill.style.width='0%';D.rcRpmFill.className='fill';}
+  }
+  // 状态 pill: CHARGING / ON BATTERY / DIRECT SUPPLY / STANDBY + 净W
+  if(D.cpm){
+    let m='STANDBY';
+    if(s.chargePower>0)m='CHARGING';
+    else if(s.dischargePower>0)m='ON BATTERY';
+    else if(s.sdcVoltage>=0||s.voltage>=0)m='DIRECT SUPPLY';
+    D.cpm.textContent=m;
+    D.cpm.className='rc-pill'+(m==='STANDBY'?'':' on');
+  }
+  if(D.cpn){
+    const net=Math.round(s.chargePower-s.dischargePower);
+    D.cpn.textContent='NET '+(net>0?'+':'')+net+' W';
+    D.cpn.className='rc-pill'+(net>0?' on':'');
+  }
+  // 12V 总线: 优先 sdcVoltage, 量程 10.5–15.0V, <11.8V 红+LOW VOLTAGE
+  const v=s.sdcVoltage>=0?s.sdcVoltage:s.voltage;
+  const vLow=v>=0&&v<11.8;
+  if(D.cvv){D.cvv.textContent=v>=0?v.toFixed(1):'--';D.cvv.className='val'+(vLow?' red':' blue');}
+  if(D.cvb){D.cvb.style.width=(v>=0?Math.max(0,Math.min(100,(v-10.5)/4.5*100)):0)+'%';D.cvb.className='fill'+(vLow?' red':'');}
+  if(D.cvs){D.cvs.textContent=vLow?'LOW VOLTAGE':'';D.cvs.className='sub'+(vLow?' red':'');}
+  if(D.cpw){D.cpw.textContent='LOW VOLTAGE';D.cpw.style.display=vLow?'':'none';}
+  // VEHICLE: 车辆电池总电量 power% (原 STATION/DJI 户外电源), <10% 红+LOW VEHICLE; 右侧充/放功率取大者
+  const p=s.power;
+  const pLow=p>=0&&p<10;
+  if(D.csv){D.csv.textContent=p>=0?Math.round(p)+'%':'--';D.csv.className='val'+(pLow?' red':' amber');}
+  if(D.csb){D.csb.style.width=(p>=0?Math.min(100,p):0)+'%';D.csb.className='fill'+(pLow?' red':' amber');}
+  if(D.cws){D.cws.textContent='LOW VEHICLE';D.cws.style.display=pLow?'':'none';}
+  if(D.csf){
+    const c=s.chargePower,dp=s.dischargePower;
+    D.csf.textContent=(c>=0||dp>=0)?(c>=dp?'\u2191 '+Math.round(c)+' W':'\u2193 '+Math.round(dp)+' W'):'--';
+  }
+  // FUEL: 油量% + 续航 km
+  const f=s.fuelLevel;
+  const fLow=f>=0&&f<12;
+  if(D.cfv){D.cfv.textContent=f>=0?Math.round(f)+'%':'--';D.cfv.className='val'+(fLow?' red':' orange');}
+  if(D.cfb){D.cfb.style.width=(f>=0?Math.min(100,f):0)+'%';D.cfb.className='fill'+(fLow?' red':' orange');}
+  if(D.crg){
+    const km=f>0?Math.round(f/100*82/(s.fuelCons>0?s.fuelCons:9.5)*100):-1;
+    D.crg.textContent=km>=0?'RANGE '+km+' KM':'RANGE -- KM';
+  }
+  // 页脚
+  if(D.codo)D.codo.textContent=s.odo>=0?s.odo.toFixed(1):'--';
+  if(D.ccons)D.ccons.textContent=s.fuelCons>0?s.fuelCons.toFixed(1):'--';
+  if(D.calt)D.calt.textContent=s.altitude>=0?Math.round(s.altitude)+'m':'--';
+  if(D.cslp){
+    if(s.slope!==-1&&s.slope!==undefined){
+      const a=Math.abs(s.slope);
+      D.cslp.textContent=(a<0.3?'0':(a<10?a.toFixed(1):Math.round(a)))+'%';
+      D.cslp.className='val'+(a<0.5?'':(s.slope>0?' amber':' blue'));
+    }else{D.cslp.textContent='--';D.cslp.className='val';}
+  }
+  if(D.chdg)D.chdg.textContent=s.heading>=0?Math.round(s.heading)+'\u00b0':'--';
+  if(D.ctim)D.ctim.textContent=hhmm();
+}
+
+// ══ Theme D — NIGHT 航空夜航表盘 渲染引擎 (r2) ══
+const RD_BUS_SEGS=12,RD_STA_SEGS=12;
+function rdFillBar(el,n){
+  if(!el)return;
+  if(el.children.length!==RD_BUS_SEGS){
+    el.innerHTML='';
+    for(let i=0;i<RD_BUS_SEGS;i++)el.appendChild(document.createElement('div'));
+  }
+  const k=Math.max(0,Math.min(RD_BUS_SEGS,Math.round(n)));
+  for(let i=0;i<RD_BUS_SEGS;i++)el.children[i].className=i<k?'rd-seg on':'rd-seg';
+}
+function renderThemeD(){
+  const s=st;
+  if(D.dsp)D.dsp.textContent=s.speed>=0?String(Math.round(s.speed)):'--';
+  // 转速: 0–7000 标尺, >6000 hot 转红(红区 6000–7000)
+  if(D.drpm&&D.drpf){
+    if(s.rpm>=0){
+      D.drpm.textContent=String(Math.round(s.rpm));
+      D.drpf.style.width=(Math.max(0,Math.min(7000,s.rpm))/7000*100).toFixed(1)+'%';
+      D.drpf.classList.toggle('hot',s.rpm>6000);
+    }else{D.drpm.textContent='--';D.drpf.style.width='0%';D.drpf.classList.remove('hot');}
+  }
+  if(D.dgr)D.dgr.textContent=(s.speed>=0&&s.rpm>=0)?'D'+calcGear(s.speed,s.rpm):'N';
+  // 12V 总线电压: 优先 sdcVoltage, 回退 voltage
+  const v=s.sdcVoltage>=0?s.sdcVoltage:(s.voltage>=0?s.voltage:-1);
+  if(D.dbus)D.dbus.textContent=v>=0?v.toFixed(1):'--.-';
+  if(D.dst)D.dst.textContent=s.power>=0?Math.round(s.power)+'%':'--%';
+  // 净功率: charge/discharge 取大者, ↑充↓放
+  let net='--W',arrow='';
+  if(s.chargePower>0||s.dischargePower>0){
+    if(s.chargePower>=s.dischargePower){net=Math.round(s.chargePower)+'W';arrow='↑';}
+    else{net=Math.round(s.dischargePower)+'W';arrow='↓';}
+  }
+  if(D.dnet)D.dnet.innerHTML=net+(arrow?' <i>'+arrow+'</i>':'');
+  // 分段 mini 条: 左=电压(10.5–15.0 映射), 右=车辆电池电量
+  if(D.dbb&&v>=0)rdFillBar(D.dbb,(v-10.5)/(15.0-10.5)*RD_BUS_SEGS);
+  if(D.dsb&&s.power>=0)rdFillBar(D.dsb,s.power/100*RD_STA_SEGS);
+  // 告警: 低压 <11.8V / 车辆电池 <10% → 轨转红 + 低频 pulse
+  const lowV=v>=0&&v<11.8,lowS=s.power>=0&&s.power<10;
+  const uid=document.getElementById('uiD');
+  if(uid)uid.classList.toggle('low',lowV||lowS);
+  if(D.dal){
+    const a=[];
+    if(lowV)a.push('LOW VOLTAGE');
+    if(lowS)a.push('LOW VEHICLE');
+    D.dal.textContent=a.join(' · ');
+  }
+  if(D.dcp){
+    if(s.heading>=0){
+      const hdg=Math.round(s.heading)%360;
+      D.dcp.textContent=(CARD_CN[((Math.round(hdg/45)*45)%360+360)%360]||'')+' '+hdg+'\u00b0';
+    }else D.dcp.textContent='--';
+  }
+  if(D.dtim)D.dtim.textContent=hhmm();
+}
+
+function updateData(d){
+  if(d.speed!==undefined&&d.speed>=0)st.speed=d.speed;
+  if(d.rpm!==undefined&&d.rpm>=0){st.rpm=d.rpm;targetRpm=d.rpm;}
+  if(d.engineLoad!==undefined&&d.engineLoad>=0)st.engineLoad=d.engineLoad;
+  if(d.throttlePos!==undefined&&d.throttlePos>=0)st.throttlePos=d.throttlePos;
+  if(d.voltage!==undefined&&d.voltage>=0)st.voltage=d.voltage;
+  if(d.power!==undefined&&d.power>=0)st.power=d.power;
+  if(d.chargePower!==undefined&&d.chargePower>=0)st.chargePower=d.chargePower;
+  if(d.dischargePower!==undefined&&d.dischargePower>=0)st.dischargePower=d.dischargePower;
+  if(d.miniPower!==undefined&&d.miniPower>=0)st.miniPower=d.miniPower;
+  if(d.miniChargePower!==undefined&&d.miniChargePower>=0)st.miniChargePower=d.miniChargePower;
+  if(d.sdcVoltage!==undefined&&d.sdcVoltage>=0)st.sdcVoltage=d.sdcVoltage;
+  if(d.fuelCons!==undefined&&d.fuelCons>=0)st.fuelCons=d.fuelCons;
+  if(d.fuelLevel!==undefined&&d.fuelLevel>=0)st.fuelLevel=d.fuelLevel;
+  if(d.odo!==undefined&&d.odo>=0)st.odo=d.odo;
+  if(d.heading!==undefined&&d.heading>=0)st.heading=d.heading;
+  if(d.engHrs!==undefined&&d.engHrs>=0)st.engHrs=d.engHrs;
+  if(d.srvKm!==undefined&&d.srvKm>=0)st.srvKm=d.srvKm;
+  if(d.co2!==undefined&&d.co2>=0)st.co2=d.co2;
+  if(d.presence!==undefined)st.presence=d.presence;
+  if(d.wifiOn!==undefined)st.wifiOn=d.wifiOn;
+  if(d.piOn!==undefined)st.piOn=d.piOn;
+  if(d.acOn!==undefined&&d.acOn>=0)st.acOn=d.acOn;
+  if(d.nanoOn!==undefined)st.nanoOn=d.nanoOn;
+  if(d.altitude!==undefined)st.altitude=d.altitude;
+  if(d.slope!==undefined)st.slope=d.slope;
+  // Heading — direct set, CSS transition smooths the strip
+  if(d.heading!==undefined&&d.heading>=0)targetHdg=d.heading;
+  requestDraw();
+  tbEnsureAnim();
+}
+
+setInterval(()=>{
+  const n=new Date();
+  const t=String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0');
+  document.getElementById('clockT').textContent=t;
+  if(D.nt)D.nt.textContent=t;
+  if(D.ctim)D.ctim.textContent=t;
+  if(D.dtim)D.dtim.textContent=t;
+},10000);
+
+// ── Voice wave animation (sine wave with natural jitter) ──
+// ⚠️ 2026-08-06 FIX: was unconditional rAF recursion even when voice overlay idle,
+//    pegging WebView at 102% CPU + load 21 → HUD freezes. Now gate-driven:
+//    animateWave() self-stops when overlay inactive; draw() restarts it on activation.
+const VOICE={vo:document.getElementById('voiceOverlay'),vm:document.getElementById('voiceMic'),vt:document.getElementById('voiceText')};
+const waveBars=document.querySelectorAll('#voiceOverlay .v-bar');
+const WAVE_TOTAL_BARS=waveBars.length;
+const WAVE_CENTER=Math.floor(WAVE_TOTAL_BARS/2);
+const WAVE_MAX_H=2.2;  // vw
+const WAVE_MIN_H=0.3;
+let waveRunning=false;
+
+function animateWave(){
+  const vo=VOICE.vo;
+  if(!vo.classList.contains('active')){
+    // Overlay hidden — stop scheduling frames entirely (was the CPU killer)
+    waveRunning=false;
+    return;
+  }
+  if(vo.classList.contains('processing')){
+    // Pulsing glow handled by CSS — keep looping but no per-bar work
+    requestAnimationFrame(animateWave);
+    return;
+  }
+  if(vo.classList.contains('speaking')){
+    // Speaking: gentle breathing oscillation
+    const t=Date.now()/600;
+    waveBars.forEach((bar,i)=>{
+      const h=WAVE_MIN_H+Math.sin(t+i*0.8)*0.15+0.15;
+      bar.style.height=h+'vw';
+    });
+    requestAnimationFrame(animateWave);
+    return;
+  }
+  // Active listening wave
+  const t=Date.now()/300;
+  const jitter=Math.sin(Date.now()/500)*0.15;
+  waveBars.forEach((bar,i)=>{
+    const dist=Math.abs(i-WAVE_CENTER)/WAVE_CENTER;
+    const base=WAVE_MIN_H+(WAVE_MAX_H-WAVE_MIN_H)*(1-dist*0.6);
+    const h=Math.max(WAVE_MIN_H,base+Math.sin(t-i*0.7)*0.35+jitter*(1-dist));
+    bar.style.height=Math.min(WAVE_MAX_H,h)+'vw';
+  });
+  requestAnimationFrame(animateWave);
+}
+
+// ⚠️ 2026-08-06 FIX (v2): fully data-driven rendering.
+//    Removed unconditional 60fps loop entirely. draw() runs only when
+//    updateData() arrives (OBD ~1-2Hz); RPM/compass smoothness handled
+//    by CSS transitions. No rAF when idle → WebView CPU → ~0.
+let drawPending=false;
+function requestDraw(){
+  if(drawPending)return;
+  drawPending=true;
+  requestAnimationFrame(()=>{drawPending=false;draw();});
+}
+// Kick off initial render once page is ready
+requestDraw();
+window.addEventListener('resize',requestDraw);
+setTimeout(requestDraw,400);
+</script>
+</body>
+</html>

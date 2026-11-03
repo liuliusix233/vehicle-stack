@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>HUD - Pure Black with ODO</title>
+<style>
+    * { box-sizing: border-box; }
+    body { 
+        background-color: #000; 
+        display: flex; justify-content: center; align-items: center; 
+        height: 100vh; margin: 0; color: #fff;
+        font-family: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        text-transform: uppercase;
+    }
+    #hud {
+        width: 480px; height: 240px;
+        background-color: #000; 
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .header {
+        position: absolute; top: 12px; left: 16px; right: 16px; height: 20px;
+        display: flex; justify-content: space-between; align-items: center;
+        z-index: 10;
+    }
+    
+    .top-left-group { display: flex; align-items: center; gap: 12px; height: 100%; }
+    
+    .outdoor-power {
+        display: flex; align-items: center; gap: 4px; height: 100%;
+        font-size: 10px; font-weight: 700; color: #00e676;
+        border: 1px solid rgba(0, 230, 118, 0.4);
+        padding: 0 6px; border-radius: 3px;
+    }
+    .outdoor-power svg { margin-bottom: 1px; }
+
+    .sys-tags { font-size: 10px; font-weight: 700; color: #fff; letter-spacing: 1px; display: flex; align-items: center; gap: 4px; }
+    .dot { width: 4px; height: 4px; background: #00A1E4; border-radius: 50%; display: inline-block; }
+
+    .compass { font-size: 12px; font-weight: 700; color: #fff; letter-spacing: 2px; display: flex; align-items: center; gap: 6px; position: absolute; left: 50%; transform: translateX(-50%); height: 100%; }
+    .compass::before { content: '▼'; color: #E1251B; font-size: 10px; }
+
+    .time { font-size: 13px; font-weight: 600; letter-spacing: 1px; color: #aaa; height: 100%; display: flex; align-items: center; }
+
+    .center-stage {
+        position: absolute; top: 45px; left: 0; width: 100%; height: 120px;
+        display: flex; justify-content: center; align-items: center; gap: 6px;
+        z-index: 10;
+    }
+    .speed-val { font-size: 96px; font-weight: 400; line-height: 0.8; letter-spacing: -3px; }
+    .speed-meta { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-top: 15px; }
+    .speed-unit { font-size: 11px; font-weight: 700; color: #777; letter-spacing: 1px; }
+    .gear-val { 
+        font-size: 16px; font-weight: 700; color: #fff; 
+        background: #1a1a1a; padding: 2px 10px; 
+        clip-path: polygon(10% 0, 100% 0, 90% 100%, 0% 100%); 
+        border-left: 3px solid #E1251B;
+    }
+
+    .bottom-section {
+        position: absolute; bottom: 12px; left: 16px; right: 16px;
+        display: flex; justify-content: space-between; align-items: flex-end;
+        z-index: 10;
+    }
+
+    .left-col { display: flex; flex-direction: column; gap: 10px; width: 140px; }
+    .energy-row { display: flex; flex-direction: column; gap: 3px; }
+    .e-header { display: flex; justify-content: space-between; align-items: baseline; }
+    .e-label { font-size: 10px; font-weight: 700; color: #777; letter-spacing: 1px; }
+    .e-val { font-size: 12px; font-weight: 700; }
+    
+    .e-track { width: 100%; height: 4px; background: #222; position: relative; clip-path: polygon(0 0, 100% 0, 95% 100%, 0% 100%); }
+    .e-fill { height: 100%; position: absolute; top: 0; left: 0; }
+    
+    .odo-text { font-size: 10px; font-weight: 700; color: #555; letter-spacing: 1px; margin-top: 2px;}
+    .odo-text span { color: #888; }
+
+    .right-col { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: 160px; }
+    .rpm-header { display: flex; justify-content: flex-end; align-items: baseline; gap: 8px; width: 100%; }
+    .rpm-label { font-size: 10px; font-weight: 700; color: #777; letter-spacing: 1px; }
+    .rpm-val { font-size: 18px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; }
+    
+    .rpm-gauge {
+        width: 100%; height: 6px; background: #222; 
+        position: relative;
+        clip-path: polygon(5% 0, 100% 0, 100% 100%, 0% 100%);
+        overflow: hidden;
+    }
+    
+    .rpm-gradient-bg {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        background: linear-gradient(90deg, #00A1E4 0%, #fff 60%, #E1251B 85%);
+    }
+    
+    .rpm-mask {
+        position: absolute; top: 0; right: 0; height: 100%;
+        background: #222; width: 100%; 
+        transition: width 0.1s linear;
+        transform-origin: right;
+    }
+
+    .volt-text { font-size: 10px; font-weight: 700; color: #555; letter-spacing: 1px; margin-top: 2px;}
+    .volt-text span { color: #888; }
+</style>
+</head>
+<body>
+    <div id="hud">
+        <div class="header">
+            <div class="top-left-group">
+                <div class="outdoor-power">
+                    <svg viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none">
+                        <rect x="4" y="8" width="16" height="11" rx="1.5" />
+                        <path d="M8 8V5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v3" />
+                        <circle cx="9" cy="14" r="1" fill="currentColor" stroke="none" />
+                        <circle cx="15" cy="14" r="1" fill="currentColor" stroke="none" />
+                    </svg>
+                    <span id="outdoorPwrText">242 W</span>
+                </div>
+                <div class="sys-tags"><span class="dot"></span> PI <span class="dot"></span> NANO</div>
+            </div>
+            <div class="compass">E 90°</div>
+            <div class="time">16:47</div>
+        </div>
+
+        <div class="center-stage">
+            <div class="speed-val" id="speedNum">140</div>
+            <div class="speed-meta">
+                <div class="speed-unit">KM/H</div>
+                <div class="gear-val" id="gearNum">D7</div>
+            </div>
+        </div>
+
+        <div class="bottom-section">
+            <div class="left-col">
+                <div class="energy-row">
+                    <div class="e-header">
+                        <span class="e-label">FUE</span>
+                        <span class="e-val" style="color:#fff;">81%</span>
+                    </div>
+                    <div class="e-track"><div class="e-fill" style="width: 81%; background: #fff;"></div></div>
+                </div>
+                <div class="energy-row">
+                    <div class="e-header">
+                        <span class="e-label">BAT</span>
+                        <span class="e-val" style="color:#00A1E4;">100%</span>
+                    </div>
+                    <div class="e-track"><div class="e-fill" style="width: 100%; background: #00A1E4;"></div></div>
+                </div>
+                <div class="odo-text">ODO <span>36632.8 KM</span></div>
+            </div>
+
+            <div class="right-col">
+                <div class="rpm-header">
+                    <span class="rpm-label">ENGINE RPM</span>
+                    <span class="rpm-val" id="rpmText">5691</span>
+                </div>
+                <div class="rpm-gauge">
+                    <div class="rpm-gradient-bg"></div>
+                    <div class="rpm-mask" id="rpmMask"></div>
+                </div>
+                <div class="volt-text">VOLT <span>13.6 V</span></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const rpmMask = document.getElementById('rpmMask');
+        const rpmText = document.getElementById('rpmText');
+        const speedNum = document.getElementById('speedNum');
+        const gearNum = document.getElementById('gearNum');
+        const outdoorPwrText = document.getElementById('outdoorPwrText');
+
+        let speed = 140;
+        let rpm = 5691;
+        let outPwr = 242; 
+        let gear = 7;
+        let isAccel = true;
+
+        setInterval(() => {
+            if(isAccel) {
+                speed += (Math.random() * 1.5);
+                rpm += (Math.random() * 200);
+                if(rpm > 6800) { 
+                    isAccel = false; 
+                    gear = Math.min(9, gear + 1); 
+                    rpm = 3800; 
+                }
+            } else {
+                speed -= (Math.random() * 1.2);
+                rpm -= (Math.random() * 150);
+                if(rpm < 2000) { 
+                    isAccel = true; 
+                    gear = Math.max(1, gear - 1); 
+                    rpm = 3000; 
+                }
+            }
+
+            if (speed > 160) speed = 160;
+            if (speed < 60) speed = 60;
+
+            speedNum.textContent = Math.round(speed);
+            gearNum.textContent = 'D' + gear;
+            
+            outPwr += (Math.random() - 0.5) * 10;
+            if (outPwr < 240) outPwr = 240;
+            if (outPwr > 290) outPwr = 290;
+            outdoorPwrText.textContent = Math.round(outPwr) + ' W';
+
+            let rpmPct = Math.min(100, Math.max(0, (rpm / 7000) * 100));
+            rpmMask.style.width = (100 - rpmPct) + '%';
+            rpmText.textContent = Math.round(rpm);
+
+        }, 150);
+    </script>
+</body>
+</html>

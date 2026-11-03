@@ -1,0 +1,7 @@
+<!doctype html><html><body><script>
+var im=new Image();
+im.crossOrigin='anonymous';
+im.onload=function(){document.title='RESULT:ok';document.body.textContent='RESULT:ok '+im.width;};
+im.onerror=function(){document.title='RESULT:fail';document.body.textContent='RESULT:fail';};
+im.src='https://tile.openstreetmap.org/14/13600/6700.png';
+</script></body></html>

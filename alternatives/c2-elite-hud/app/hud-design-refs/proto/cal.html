@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><style>
+html,body{margin:0;padding:0;background:#000}
+#box{width:480px;height:240px;border:2px solid #fff;box-sizing:border-box;color:#0f0;font:20px monospace;position:relative}
+#t{position:absolute;left:6px;top:6px;color:#0f0}
+#b{position:absolute;left:6px;bottom:6px;color:#ff0}
+</style></head>
+<body>
+<div id="box"><div id="t">t</div><div id="b">b</div></div>
+<script>
+document.getElementById('t').textContent = 'VP ' + window.innerWidth + 'x' + window.innerHeight + ' dpr' + window.devicePixelRatio;
+document.getElementById('b').textContent = 'BOX ' + document.getElementById('box').getBoundingClientRect().width + 'x' + document.getElementById('box').getBoundingClientRect().height;
+</script>
+</body></html>

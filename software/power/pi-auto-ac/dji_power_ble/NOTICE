@@ -1,0 +1,7 @@
+dji_power_ble — vendored from https://github.com/zuyan9/ha-dji-power-ble
+
+License: 0BSD (see upstream LICENSE).
+Modifications: stripped the Home Assistant component layer; kept the DUML
+protocol codec and the local BLE client for use by standalone scripts.
+
+No affiliation with DJI.

@@ -1,0 +1,1457 @@
+"""Persistent local BLE client for DJI Power stations."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeAlias
+
+from bleak import BleakClient
+from bleak.backends.device import BLEDevice
+from bleak.exc import BleakError
+from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
+
+from .duml import (
+    ACCESSORIES_KEY,
+    APP_DISCOVERY_KEYS,
+    APP_SOURCE,
+    AUTH_COMMAND,
+    CAR_CHARGER_NUMBERS,
+    CAR_CHARGERS_KEY,
+    CHARGE_LIMIT_KEY,
+    CHECK_SECRET_KEY,
+    ECO_MODE_KEY,
+    ENERGY_STORAGE_KEY,
+    EXPANSION_BATTERIES_KEY,
+    GATT_LAYOUTS,
+    GET_COMMAND,
+    HMS_COMMAND,
+    POWER_1000_ENCRYPTION_TYPE,
+    POWER_COMMAND_SET,
+    POWER_DESTINATION,
+    POWER_SWITCH_KEY,
+    REPORT_COMMAND,
+    RULES_KEY,
+    SET_COMMAND,
+    START_BIND,
+    TELEMETRY_COMMAND,
+    TIME_PERIODS_KEY,
+    DumlPacket,
+    DumlStream,
+    ProtocolError,
+    build_car_charger_set_payload,
+    build_charge_limits_set_payload,
+    build_charge_power_set_payload,
+    build_discharge_power_set_payload,
+    build_energy_reserve_set_payload,
+    build_keyed_set_payload,
+    build_port_switch_set_payload,
+    build_power_adjustment_set_payload,
+    build_time_periods_set_payload,
+    decrypt_power_1000_payload,
+    encrypt_power_1000_payload,
+    energy_reserve_bounds,
+    normalize_pair_key,
+    normalize_time_periods,
+    parse_keyed_values,
+    parse_report,
+    parse_set_ack,
+    parse_telemetry,
+    validate_time_periods_mode,
+)
+from .features import (
+    ModelFeature,
+    eligible_port_switches,
+    feature_available,
+    is_known_model,
+    supports_feature,
+)
+
+if TYPE_CHECKING:
+    from bleak.backends.characteristic import BleakGATTCharacteristic
+
+    from .local_ble import LocalBleakClient
+
+_LOGGER = logging.getLogger(__name__)
+
+DEFAULT_REQUEST_TIMEOUT = 8.0
+DEFAULT_CONNECT_TIMEOUT = 30.0
+RESUME_PROBE_TIMEOUT = 3.0
+AUTHENTICATION_ATTEMPTS = 2
+READBACK_RETRIES = 8
+READBACK_RETRY_INTERVAL = 2.0
+EXPANSION_REFRESH_INTERVAL = 30.0
+CAPABILITY_DISCOVERY_TIMEOUT = 45.0
+EXPANSION_MODELS = {
+    "DJI Power 1000", "DJI Power 1000 V2", "DJI Power 2000",
+    "DJI Power Auro 2000 Elite",
+}
+_INITIAL_CONFIG_KEYS = (
+    0x00,  # Firmware versions.
+    0x02,  # Network state.
+    CHARGE_LIMIT_KEY,
+    ENERGY_STORAGE_KEY,
+    0x0C,  # Display settings.
+    POWER_SWITCH_KEY,
+    RULES_KEY,  # Station rules, which DJI Home reads from every model.
+    0x15,  # Timezone.
+)
+
+
+_RESERVE_INVALIDATION = {
+    "key_06": None,
+    "energy_reserve_available": None,
+    "energy_reserve_enabled": None,
+}
+_RULES_INVALIDATION = {
+    "key_0e": None,
+    "station_rules": None,
+    "car_auto_threshold": None,
+    "port_switches_offered": None,
+}
+
+
+class DjiPowerError(Exception):
+    """Base device/transport error."""
+
+
+class DjiPowerAuthenticationError(DjiPowerError):
+    """The station did not complete local authentication."""
+
+
+class DjiPowerDisconnectedError(DjiPowerError):
+    """The BLE link disappeared during an operation."""
+
+
+class DjiPowerScheduleChangedError(DjiPowerError):
+    """The station schedule changed while a replacement was being edited."""
+
+
+class _ConfigTooLarge(DjiPowerError):
+    """The station requires the requested keys to be read individually."""
+
+
+StateCallback: TypeAlias = Callable[[dict[str, object]], None]
+DisconnectCallback: TypeAlias = Callable[[Exception | None], None]
+
+
+class DjiPowerDevice:
+    """One authenticated station with a long-lived push connection."""
+
+    def __init__(
+        self,
+        ble_device: BLEDevice,
+        pair_key: str | bytes,
+        *,
+        name: str,
+        model: str = "DJI Power",
+        serial_number: str | None = None,
+        local_adapter: str | None = None,
+        keep_connection: bool = False,
+        allocate_connection_slot: Callable[[BLEDevice], bool] | None = None,
+        release_connection_slot: Callable[[BLEDevice], None] | None = None,
+    ) -> None:
+        if keep_connection and local_adapter is None:
+            raise ValueError("Connection retention requires a selected local adapter")
+        self._ble_device = ble_device
+        self._local_adapter = local_adapter
+        self.keep_connection = keep_connection
+        self._authenticated = False
+        self._allocate_slot_callback = allocate_connection_slot
+        self._release_slot_callback = release_connection_slot
+        self._slot_allocated = False
+        self._pair_key = normalize_pair_key(pair_key)
+        self._name = name
+        self.model = model
+        self._encrypted_transport = model == "DJI Power 1000"
+        self.serial_number = serial_number
+        self._client: BleakClient | LocalBleakClient | None = None
+        self._write_characteristic: BleakGATTCharacteristic | None = None
+        self._stream = DumlStream()
+        self._sequence = 0x1000
+        self._pending: dict[int, tuple[int, int, asyncio.Future[DumlPacket]]] = {}
+        self._state_callbacks: set[StateCallback] = set()
+        self._disconnect_callbacks: set[DisconnectCallback] = set()
+        self._report_event = asyncio.Event()
+        self._operation_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
+        self._settings_ack_tasks: set[asyncio.Task[None]] = set()
+        self._expansion_refresh_task: asyncio.Task[None] | None = None
+        self._disconnecting = False
+        self.data: dict[str, object] = {}
+
+    @property
+    def address(self) -> str:
+        """Return the current platform BLE address."""
+        return self._ble_device.address
+
+    @property
+    def is_connected(self) -> bool:
+        """Return whether the underlying GATT client is connected."""
+        return self._client is not None and self._client.is_connected
+
+    @property
+    def can_retain_connection(self) -> bool:
+        """Return whether this authorized local session can survive a reload."""
+        return (
+            self.keep_connection
+            and self._local_adapter is not None
+            and self._authenticated
+            and self.is_connected
+        )
+
+    def matches_connection(
+        self, address: str, pair_key: str | bytes, *,
+        local_adapter: str | None, model: str,
+    ) -> bool:
+        """Check settings which require a new transport or authentication."""
+        try:
+            normalized_key = normalize_pair_key(pair_key)
+        except ProtocolError:
+            return False
+        return (
+            self.address.upper() == address.upper()
+            and self._pair_key == normalized_key
+            and self._local_adapter == local_adapter
+            and self.model == model
+        )
+
+    def update_ble_device(self, ble_device: BLEDevice) -> None:
+        """Use a fresher scanner object for the next connection."""
+        self._ble_device = ble_device
+
+    def add_state_listener(self, callback: StateCallback) -> Callable[[], None]:
+        """Register a state listener and return its unsubscribe function."""
+        self._state_callbacks.add(callback)
+        return lambda: self._state_callbacks.discard(callback)
+
+    def add_disconnect_listener(
+        self, callback: DisconnectCallback
+    ) -> Callable[[], None]:
+        """Register an unexpected-disconnect listener."""
+        self._disconnect_callbacks.add(callback)
+        return lambda: self._disconnect_callbacks.discard(callback)
+
+    def _next_sequence(self) -> int:
+        self._sequence = (self._sequence + 1) & 0xFFFF
+        return self._sequence
+
+    def _merge_data(self, update: dict[str, object]) -> None:
+        if "battery_time_type" in update or "input_w" in update:
+            # Battery and power records can arrive separately. Match the app's
+            # green bar using the newest value of each, before publishing.
+            time_type = update.get(
+                "battery_time_type", self.data.get("battery_time_type")
+            )
+            input_w = update.get("input_w", self.data.get("input_w"))
+            charging = None
+            if time_type in (0, 2):
+                charging = False
+            elif time_type == 1 and isinstance(input_w, (int, float)):
+                charging = input_w > 0
+            update = {**update, "charging": charging}
+        changed = any(self.data.get(key) != value for key, value in update.items())
+        if not changed:
+            return
+        self.data.update(update)
+        snapshot = dict(self.data)
+        for callback in tuple(self._state_callbacks):
+            callback(snapshot)
+
+    def _on_notify(self, _characteristic: object, chunk: bytearray) -> None:
+        for packet in self._stream.feed(chunk):
+            self._handle_packet(packet)
+
+    def _handle_packet(self, packet: DumlPacket) -> None:
+        pending = self._pending.get(packet.sequence)
+        if pending is not None:
+            command_set, command_id, future = pending
+            if (
+                packet.command_set == command_set
+                and packet.command_id == command_id
+                and packet.is_response
+                and not future.done()
+            ):
+                future.set_result(packet)
+
+        if packet.command_set != POWER_COMMAND_SET:
+            return
+        if (
+            packet.command_id == TELEMETRY_COMMAND
+            and packet.destination == APP_SOURCE
+            and not packet.is_response
+            and packet.flags & 0x60
+        ):
+            self._queue_settings_ack(packet)
+        try:
+            if packet.command_id == REPORT_COMMAND:
+                update = parse_report(self._decode_payload(packet))
+                if update:
+                    self._merge_data(update)
+                    self._report_event.set()
+            elif packet.command_id == TELEMETRY_COMMAND:
+                update = parse_telemetry(self._decode_payload(packet))
+                if update:
+                    self._merge_data(update)
+            elif packet.command_id == HMS_COMMAND:
+                # The dy302+ HMS body is still capture-gated. Preserve it in
+                # diagnostics without inventing an entity schema.
+                self._merge_data({"hms_raw": self._decode_payload(packet).hex()})
+        except ProtocolError as error:
+            if packet.command_id == TELEMETRY_COMMAND:
+                invalidated = {"expansion_batteries": None}
+                if supports_feature(self.model, ModelFeature.SDC_CONTROLS):
+                    invalidated.update(
+                        car_chargers=None, key_0a=None, accessories=None, key_04=None
+                    )
+                    invalidated.update(_RULES_INVALIDATION)
+                if supports_feature(self.model, ModelFeature.RESERVE_CONTROL):
+                    invalidated.update(_RESERVE_INVALIDATION)
+                if self._reads_power_switches:
+                    invalidated.update(
+                        power_switches=None, key_0d=None, ac_enabled=None
+                    )
+                if supports_feature(self.model, ModelFeature.TARIFF_SCHEDULE):
+                    invalidated.update(time_periods=None, key_16=None)
+                self._merge_data(invalidated)
+            _LOGGER.debug(
+                "%s: ignored malformed 0x%02x push: %s",
+                self.address,
+                packet.command_id,
+                error,
+            )
+
+    def _queue_settings_ack(self, packet: DumlPacket) -> None:
+        """Acknowledge settings reports without waiting on a GET/SET operation."""
+        client = self._client
+        characteristic = self._write_characteristic
+        if (
+            self._disconnecting
+            or client is None
+            or not client.is_connected
+            or characteristic is None
+        ):
+            return
+        task = asyncio.create_task(
+            self._acknowledge_settings(packet, client, characteristic)
+        )
+        self._settings_ack_tasks.add(task)
+        task.add_done_callback(self._settings_ack_tasks.discard)
+
+    async def _acknowledge_settings(
+        self,
+        report: DumlPacket,
+        client: BleakClient | LocalBleakClient,
+        characteristic: BleakGATTCharacteristic,
+    ) -> None:
+        """Reply on the report's connection, using the model's transport cipher."""
+        payload = b"\x01"
+        flags = 0x80
+        if self._encrypted_transport:
+            payload = encrypt_power_1000_payload(payload)
+            flags |= POWER_1000_ENCRYPTION_TYPE
+        ack = DumlPacket(
+            report.destination,
+            report.source,
+            report.sequence,
+            flags,
+            report.command_set,
+            report.command_id,
+            payload,
+            version=report.version,
+        )
+        try:
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                await self._write_packet(client, characteristic, ack)
+        except (DjiPowerError, BleakError, EOFError, OSError, TimeoutError) as error:
+            _LOGGER.debug("Settings report acknowledgement failed: %s", error)
+
+    async def _write_packet(
+        self,
+        client: BleakClient | LocalBleakClient,
+        characteristic: BleakGATTCharacteristic,
+        packet: DumlPacket,
+    ) -> None:
+        """Serialize GATT writes and reject queued writes from an old session."""
+        async with self._write_lock:
+            if (
+                client is not self._client
+                or characteristic is not self._write_characteristic
+                or not client.is_connected
+                or self._disconnecting
+            ):
+                raise DjiPowerDisconnectedError("Bluetooth connection changed")
+            await client.write_gatt_char(characteristic, packet.encode(), response=True)
+
+    def _decode_payload(self, packet: DumlPacket) -> bytes:
+        """Decode a wire payload before interpreting command-specific fields."""
+        if packet.encryption_type == 0:
+            return packet.payload
+        if (
+            packet.encryption_type == POWER_1000_ENCRYPTION_TYPE
+            and self._encrypted_transport
+        ):
+            return decrypt_power_1000_payload(packet.payload)
+        raise ProtocolError(
+            f"unsupported payload encryption type {packet.encryption_type} "
+            f"for {self.model}"
+        )
+
+    def _on_disconnect(self, _client: BleakClient) -> None:
+        self._client = None
+        self._authenticated = False
+        self._release_connection_slot()
+        self._write_characteristic = None
+        if self._expansion_refresh_task is not None:
+            self._expansion_refresh_task.cancel()
+        for task in self._settings_ack_tasks:
+            task.cancel()
+        error = DjiPowerDisconnectedError(f"{self.address} disconnected")
+        for _, _, future in self._pending.values():
+            if not future.done():
+                future.set_exception(error)
+        self._pending.clear()
+        if self._disconnecting:
+            return
+        for callback in tuple(self._disconnect_callbacks):
+            callback(error)
+
+    async def _establish(self) -> BleakClient | LocalBleakClient:
+        if self._local_adapter is not None:
+            # Bypass HA's automatic source selection and retry-connector's
+            # adapter switching for an explicitly selected local adapter.
+            from .local_ble import LocalBleakClient
+
+            if self._allocate_slot_callback is not None:
+                if not self._allocate_slot_callback(self._ble_device):
+                    raise DjiPowerError(
+                        "No free connection slot on the selected Bluetooth adapter"
+                    )
+                self._slot_allocated = True
+            client = LocalBleakClient(
+                self._ble_device, disconnected_callback=self._on_disconnect
+            )
+            self._client = client  # Also clean up a failed/cancelled connect.
+            await client.connect()
+            return client
+        return await establish_connection(
+            BleakClientWithServiceCache,
+            self._ble_device,
+            self._name,
+            disconnected_callback=self._on_disconnect,
+            max_attempts=3,
+        )
+
+    def _release_connection_slot(self) -> None:
+        """Release HA's reservation only when the underlying link has closed."""
+        if self._slot_allocated:
+            self._slot_allocated = False
+            if self._release_slot_callback is not None:
+                self._release_slot_callback(self._ble_device)
+
+    async def _subscribe(self, client: BleakClient) -> None:
+        """Select a complete GATT layout from this connection's services."""
+        self._write_characteristic = None
+        for service_uuid, notify_uuid, write_uuid in GATT_LAYOUTS:
+            service = client.services.get_service(service_uuid)
+            if service is None:
+                continue
+            notify = service.get_characteristic(notify_uuid)
+            write = service.get_characteristic(write_uuid)
+            if notify is None or write is None:
+                continue
+            self._write_characteristic = write
+            _LOGGER.debug(
+                "DJI Power GATT layout: service=%s notify=%s write=%s",
+                service_uuid,
+                notify_uuid,
+                write_uuid,
+            )
+            await client.start_notify(notify, self._on_notify)
+            return
+        raise BleakError(
+            "No complete supported DJI Power GATT layout found "
+            "(a002/c305/c304 or fff0/fff4/fff5)"
+        )
+
+    async def connect(self) -> None:
+        """Connect, subscribe, authenticate, and fetch initial state."""
+        if self.is_connected:
+            return
+        self._disconnecting = False
+        self._authenticated = False
+        self._stream.clear()
+        self._report_event.clear()
+        try:
+            async with asyncio.timeout(DEFAULT_CONNECT_TIMEOUT):
+                await self._connect_and_initialize()
+            self._start_expansion_refresh()
+        except TimeoutError as error:
+            await self.disconnect()
+            raise DjiPowerError(
+                f"connection timed out after {DEFAULT_CONNECT_TIMEOUT:.0f} seconds"
+            ) from error
+        except BaseException:
+            await self.disconnect()
+            raise
+
+    async def _connect_and_initialize(self) -> None:
+        """Establish and initialize the link within the caller's deadline."""
+        client = await self._establish()
+        self._client = client
+        try:
+            await self._subscribe(client)
+        except BleakError:
+            if self._local_adapter is not None:
+                # A retained session must not be dropped by automatic cache
+                # recovery, nor moved to a different adapter.
+                raise
+            # Partial service discovery can poison BlueZ's cache. Rediscover and
+            # select the characteristics again on the replacement connection.
+            _LOGGER.debug("%s: clearing incomplete GATT cache", self.address)
+            with contextlib.suppress(AttributeError, BleakError):
+                await client.clear_cache()
+            await self.disconnect()
+            client = await self._establish()
+            self._client = client
+            await self._subscribe(client)
+        resumed = (
+            self.keep_connection
+            and getattr(client, "connected_before_attach", False)
+            and await self._resume_session()
+        )
+        if not resumed:
+            await self._authenticate()
+        self._authenticated = True
+        await self.refresh_config()
+        try:
+            async with asyncio.timeout(5):
+                await self._report_event.wait()
+        except TimeoutError:
+            # Config state is enough to set up; the periodic report may be
+            # delayed on an idle or older station.
+            _LOGGER.debug("%s: no initial 0x61 push within five seconds", self.address)
+
+    async def _resume_session(self) -> bool:
+        """Prove an existing link is authorized with a fresh, matched GET."""
+        try:
+            response = await self._request(
+                GET_COMMAND,
+                bytes((0x00, CHARGE_LIMIT_KEY, 0x10)),
+                timeout=RESUME_PROBE_TIMEOUT,
+            )
+            payload = self._decode_payload(response)
+            # Require the successful GET envelope and the requested record;
+            # unsolicited reports, empty ACKs, and cached data prove nothing.
+            if (
+                response.source != POWER_DESTINATION
+                or response.destination != APP_SOURCE
+                or len(payload) < 20
+                or payload[:4] != bytes(4)
+                or payload[6:8] != b"\x10\x00"
+                or len(parse_keyed_values(payload).get(CHARGE_LIMIT_KEY, b"")) != 24
+            ):
+                return False
+            self._merge_data(parse_telemetry(payload))
+        except DjiPowerDisconnectedError:
+            raise
+        except (DjiPowerError, BleakError, ProtocolError, TimeoutError):
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from None
+            _LOGGER.debug("Existing Bluetooth session could not be resumed")
+            return False
+        _LOGGER.debug("Resumed authenticated local Bluetooth session")
+        return True
+
+    async def disconnect(self, *, keep_connection: bool = False) -> None:
+        """Close the client, optionally retaining an authorized link at HA stop."""
+        client = self._client
+        retain = (
+            keep_connection
+            and self.keep_connection
+            and self._authenticated
+            and client is not None
+            and client.is_connected
+        )
+        self._disconnecting = True
+        self._client = None
+        self._authenticated = False
+        self._write_characteristic = None
+        for _, _, future in self._pending.values():
+            if not future.done():
+                future.set_exception(
+                    DjiPowerDisconnectedError("Bluetooth client closed")
+                )
+        self._pending.clear()
+        ack_tasks = tuple(self._settings_ack_tasks)
+        for ack_task in ack_tasks:
+            ack_task.cancel()
+        if ack_tasks:
+            await asyncio.gather(*ack_tasks, return_exceptions=True)
+        task = self._expansion_refresh_task
+        self._expansion_refresh_task = None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if client is None:
+            self._release_connection_slot()
+            self._disconnecting = False
+            return
+        retained = False
+        try:
+            if retain and client.is_connected:
+                try:
+                    await client.detach()
+                    retained = True
+                    # BlueZ and HA's physical-link watcher now own the slot.
+                    self._slot_allocated = False
+                    _LOGGER.debug(
+                        "Kept local Bluetooth link during Home Assistant stop"
+                    )
+                    return
+                except (
+                    BleakError, AttributeError, RuntimeError, OSError, TimeoutError
+                ):
+                    _LOGGER.warning(
+                        "Could not retain local Bluetooth link; closing the connection"
+                    )
+            # Bleak stops notifications as part of disconnecting.
+            with contextlib.suppress(BleakError):
+                await client.disconnect()
+        finally:
+            if not retained:
+                self._release_connection_slot()
+            self._disconnecting = False
+
+    async def _request(
+        self,
+        command_id: int,
+        payload: bytes,
+        *,
+        timeout: float = DEFAULT_REQUEST_TIMEOUT,
+    ) -> DumlPacket:
+        client = self._client
+        if client is None or not client.is_connected:
+            raise DjiPowerDisconnectedError(f"{self.address} is not connected")
+        write_characteristic = self._write_characteristic
+        if write_characteristic is None:
+            raise DjiPowerError("DJI Power GATT layout has not been selected")
+
+        sequence = self._next_sequence()
+        flags = 0x20
+        if self._encrypted_transport:
+            payload = encrypt_power_1000_payload(payload)
+            flags |= POWER_1000_ENCRYPTION_TYPE
+        packet = DumlPacket(
+            APP_SOURCE,
+            POWER_DESTINATION,
+            sequence,
+            flags,
+            POWER_COMMAND_SET,
+            command_id,
+            payload,
+        )
+        future = asyncio.get_running_loop().create_future()
+        self._pending[sequence] = (POWER_COMMAND_SET, command_id, future)
+        try:
+            async with asyncio.timeout(timeout):
+                await self._write_packet(client, write_characteristic, packet)
+                return await future
+        except TimeoutError as error:
+            raise DjiPowerError(
+                f"timeout waiting for 0x{command_id:02x} response"
+            ) from error
+        except (BleakError, EOFError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            raise DjiPowerError(
+                f"Bluetooth transport failed during 0x{command_id:02x} request"
+            ) from error
+        finally:
+            self._pending.pop(sequence, None)
+            if not future.done():
+                future.cancel()
+            elif not future.cancelled():
+                # Mark a disconnect exception retrieved if the GATT write itself
+                # raised before this coroutine got as far as awaiting the future.
+                future.exception()
+
+    def _log_auth_response(
+        self, stage: str, packet: DumlPacket, payload: bytes | None
+    ) -> None:
+        """Log response metadata without credentials, nonces, or device identifiers."""
+        _LOGGER.debug(
+            "DJI Power auth response: stage=%s status=%s payload_length=%d "
+            "source=0x%02x destination=0x%02x flags=0x%02x sequence=%d "
+            "decoded_payload_length=%s",
+            stage,
+            (payload[:1].hex() or "missing") if payload is not None else "encrypted",
+            len(packet.payload),
+            packet.source,
+            packet.destination,
+            packet.flags,
+            packet.sequence,
+            len(payload) if payload is not None else "unknown",
+        )
+
+    def _auth_payload(self, stage: str, packet: DumlPacket) -> bytes:
+        try:
+            payload = self._decode_payload(packet)
+        except ProtocolError as error:
+            self._log_auth_response(stage, packet, None)
+            raise DjiPowerError(f"cannot decode {stage} response: {error}") from error
+        self._log_auth_response(stage, packet, payload)
+        return payload
+
+    async def _authenticate(self) -> None:
+        """Authenticate, retrying status 03 once with a fresh challenge."""
+        for attempt in range(AUTHENTICATION_ATTEMPTS):
+            challenge = await self._request(AUTH_COMMAND, bytes((START_BIND,)))
+            challenge_payload = self._auth_payload("start_bind", challenge)
+            if challenge_payload[:1] != b"\x00" or len(challenge_payload) < 5:
+                raise DjiPowerAuthenticationError(
+                    "station returned an invalid auth challenge"
+                )
+            material = challenge_payload[1:5] + self._pair_key + b"\x00"
+            result = await self._request(
+                AUTH_COMMAND, bytes((CHECK_SECRET_KEY,)) + material
+            )
+            result_payload = self._auth_payload("check_secret_key", result)
+            if result_payload[:1] == b"\x00":
+                return
+            if (
+                result_payload[:1] == b"\x03"
+                and len(result_payload) >= 5
+                and attempt + 1 < AUTHENTICATION_ATTEMPTS
+            ):
+                _LOGGER.debug(
+                    "DJI Power authentication status=03; "
+                    "retrying with a fresh challenge"
+                )
+                continue
+            status = result_payload[:1].hex() or "missing"
+            raise DjiPowerAuthenticationError(
+                f"station rejected authentication (status={status})"
+            )
+
+    async def refresh_config(self) -> None:
+        """Fetch and publish a keyed configuration snapshot."""
+        if self.model in EXPANSION_MODELS:
+            await self._read_expansion_batteries()
+        await self._read_config(*_INITIAL_CONFIG_KEYS)
+
+    @property
+    def _reads_power_switches(self) -> bool:
+        """Return whether optional port switches are refreshed on this model."""
+        return supports_feature(
+            self.model, ModelFeature.SDC_CONTROLS
+        ) or supports_feature(self.model, ModelFeature.USB_CONTROLS)
+
+    def _start_expansion_refresh(self) -> None:
+        """Refresh optional packs and accessories over the existing session."""
+        if not self.is_connected or (
+            self.model not in EXPANSION_MODELS and not self._reads_power_switches
+        ):
+            return
+        if (
+            self._expansion_refresh_task is None
+            or self._expansion_refresh_task.done()
+        ):
+            self._expansion_refresh_task = asyncio.create_task(
+                self._refresh_expansion_loop(), name="dji_power_expansion_refresh"
+            )
+
+    async def _refresh_expansion_loop(self) -> None:
+        try:
+            # Discover optional controls after setup, so an unsupported request
+            # cannot consume the connection's initialization deadline.
+            async with self._operation_lock:
+                await self._discover_capabilities()
+                await self._refresh_accessory_config()
+            while self.is_connected:
+                await asyncio.sleep(EXPANSION_REFRESH_INTERVAL)
+                async with self._operation_lock:
+                    if self.model in EXPANSION_MODELS:
+                        await self._read_expansion_batteries()
+                    await self._refresh_accessory_config()
+        except DjiPowerDisconnectedError:
+            return
+
+    async def _refresh_accessory_config(self) -> None:
+        """Discover attached controls without making optional failures fatal."""
+        configs = []
+        if supports_feature(self.model, ModelFeature.SDC_CONTROLS):
+            configs.append((CAR_CHARGERS_KEY, "car_chargers"))
+        if self._reads_power_switches:
+            configs.append((POWER_SWITCH_KEY, "power_switches"))
+        if supports_feature(self.model, ModelFeature.SDC_CONTROLS):
+            configs.append((ACCESSORIES_KEY, "accessories"))
+        for key, state_key in configs:
+            try:
+                await self._read_accessory_config(key, state_key)
+            except DjiPowerDisconnectedError:
+                raise
+            except DjiPowerError as error:
+                _LOGGER.debug("Accessory configuration unavailable: %s", error)
+        # Rules also govern SDC-only stations and energy-management controls.
+        if is_known_model(self.model):
+            try:
+                await self._read_station_rules()
+            except DjiPowerDisconnectedError:
+                raise
+            except DjiPowerError as error:
+                _LOGGER.debug("Station rules unavailable: %s", error)
+        if supports_feature(self.model, ModelFeature.RESERVE_CONTROL):
+            try:
+                await self._read_energy_reserve()
+            except DjiPowerDisconnectedError:
+                raise
+            except DjiPowerError as error:
+                _LOGGER.debug("Backup reserve configuration unavailable: %s", error)
+
+    @staticmethod
+    def _config_invalidation(keys: tuple[int, ...]) -> dict[str, object]:
+        """Clear derived capability state as well as its raw records."""
+        empty = parse_telemetry(build_keyed_set_payload([(key, b"") for key in keys]))
+        update = dict.fromkeys(empty)
+        if ENERGY_STORAGE_KEY in keys:
+            update["energy_reserve"] = None
+        return update
+
+    async def _discover_capabilities(self) -> None:
+        """Run the app's optional settings probe with bounded single-key fallback.
+
+        Called after initialization, under the operation lock. Partial replies
+        never establish absence or authorize controls. Each complete reply can
+        publish independently when a station requires one key per request.
+        """
+        if not is_known_model(self.model):
+            return
+        remaining = set(APP_DISCOVERY_KEYS)
+        found: set[int] = set()
+
+        async def read(keys: tuple[int, ...]) -> None:
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                update = await self._read_config(*keys, require_complete=True)
+            returned = {
+                key for key in keys if isinstance(update.get(f"key_{key:02x}"), str)
+            }
+            missing = tuple(set(keys) - returned)
+            invalidated = self._config_invalidation(missing)
+            if RULES_KEY in missing:
+                invalidated.update(
+                    station_rules=[], car_auto_threshold=False,
+                    port_switches_offered=False,
+                )
+            self._merge_data(invalidated)
+            remaining.difference_update(keys)
+            found.update(returned)
+
+        try:
+            async with asyncio.timeout(CAPABILITY_DISCOVERY_TIMEOUT):
+                try:
+                    await read(APP_DISCOVERY_KEYS)
+                except _ConfigTooLarge:
+                    for key in APP_DISCOVERY_KEYS:
+                        try:
+                            await read((key,))
+                        except DjiPowerDisconnectedError:
+                            raise
+                        except (
+                            DjiPowerError, BleakError, EOFError, TimeoutError
+                        ) as error:
+                            # One unsupported or broken key must not suppress
+                            # the rest of the station's feature discovery.
+                            if not self.is_connected:
+                                raise DjiPowerDisconnectedError(
+                                    "Bluetooth connection lost"
+                                ) from error
+                            self._merge_data(self._config_invalidation((key,)))
+        except DjiPowerDisconnectedError:
+            raise
+        except (DjiPowerError, BleakError, EOFError, TimeoutError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            _LOGGER.debug("Capability discovery incomplete: %s", type(error).__name__)
+        if not self.is_connected:
+            raise DjiPowerDisconnectedError("Bluetooth connection lost")
+        self._merge_data({
+            **self._config_invalidation(tuple(remaining)),
+            "discovery_keys": sorted(found),
+            "capability_discovery_complete": not remaining,
+        })
+
+    async def _read_accessory_config(
+        self, key: int, state_key: str
+    ) -> dict[str, object]:
+        """Require a fresh complete list and invalidate failed snapshots."""
+        raw_key = f"key_{key:02x}"
+        try:
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                update = await self._read_config(key, require_complete=True)
+            if not isinstance(update.get(raw_key), str) or not isinstance(
+                update.get(state_key), list
+            ):
+                raise DjiPowerError(f"station omitted valid {state_key} configuration")
+        except DjiPowerDisconnectedError:
+            # The disconnect callback owns availability; do not republish here.
+            raise
+        except (DjiPowerError, BleakError, EOFError, TimeoutError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            invalidated = {raw_key: None, state_key: None}
+            if key == POWER_SWITCH_KEY:
+                invalidated["ac_enabled"] = None
+            self._merge_data(invalidated)
+            raise DjiPowerError(
+                f"cannot read {state_key} configuration: {str(error) or 'timed out'}"
+            ) from error
+        return update
+
+    async def _read_expansion_batteries(self) -> None:
+        """Read a fresh pack list; optional failures invalidate only pack state."""
+        try:
+            # Bound the write as well as the response so a stalled GATT write
+            # cannot hold the operation lock and leave old pack readings live.
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                update = await self._read_config(EXPANSION_BATTERIES_KEY)
+        except DjiPowerDisconnectedError:
+            raise
+        except (DjiPowerError, BleakError, EOFError, TimeoutError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            self._merge_data({"expansion_batteries": None})
+            _LOGGER.debug(
+                "Expansion-battery snapshot unavailable: %s",
+                str(error) or "read timed out",
+            )
+            return
+        if "expansion_batteries" not in update:
+            self._merge_data({"expansion_batteries": None})
+
+    async def _read_config(
+        self, key: int, *additional_keys: int, require_complete: bool = False
+    ) -> dict[str, object]:
+        """Read one or more explicitly requested configuration keys."""
+        payload = b"\x00" + b"".join(
+            bytes((item, 0x10)) for item in (key, *additional_keys)
+        )
+        response = await self._request(GET_COMMAND, payload)
+        try:
+            decoded = self._decode_payload(response)
+            if (
+                require_complete and len(decoded) >= 4
+                and int.from_bytes(decoded[:4], "little") in (1, 3)
+            ):
+                raise _ConfigTooLarge("station did not return complete config data")
+            if require_complete and (
+                len(decoded) < 20 or decoded[6:8] != b"\x10\x00"
+                or int.from_bytes(decoded[:4], "little") not in (0, 2)
+            ):
+                # Success (0) and missing unsupported keys (2) are complete.
+                # An oversized/partial response cannot establish absence of
+                # an optional record before a combined settings write.
+                raise DjiPowerError("station did not return complete config data")
+            update = parse_telemetry(decoded)
+        except ProtocolError as error:
+            raise DjiPowerError("station returned malformed config data") from error
+        self._merge_data(update)
+        return update
+
+    async def _read_eco_mode(self) -> str:
+        """Require a fresh eco-mode record rather than reusing cached settings."""
+        try:
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                update = await self._read_config(ECO_MODE_KEY, require_complete=True)
+            current = update.get("key_18")
+            if not isinstance(current, str):
+                raise DjiPowerError("station omitted eco-mode configuration")
+        except DjiPowerDisconnectedError:
+            # The disconnect callback already marks the coordinator unavailable.
+            # Publishing state here would mark its last update successful again.
+            raise
+        except (DjiPowerError, BleakError, EOFError, TimeoutError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            self._merge_data(
+                {
+                    "key_18": None,
+                    "eco_available": None,
+                    "power_adjustment": None,
+                    "charge_power_available": False,
+                    "charge_power_w": None,
+                    "charge_power_min_w": None,
+                    "charge_power_max_w": None,
+                    "discharge_power_available": False,
+                    "discharge_power_w": None,
+                    "discharge_power_min_w": None,
+                    "discharge_power_max_w": None,
+                }
+            )
+            raise DjiPowerError(str(error)) from error
+        return current
+
+    async def _read_charge_limits(
+        self, *, include_reserve: bool = False
+    ) -> dict[str, object]:
+        """Invalidate unreadable limits, returning only a fresh complete record."""
+        invalidated = {
+            "key_05": None,
+            **{
+                f"{key}{suffix}": None
+                for key in ("recharge_limit", "discharge_limit")
+                for suffix in ("", "_min", "_max")
+            },
+        }
+        reserve_invalidated = {**_RESERVE_INVALIDATION, "energy_reserve": None}
+        if include_reserve:
+            invalidated.update(reserve_invalidated)
+        try:
+            update = await self._read_config(
+                CHARGE_LIMIT_KEY,
+                *((ENERGY_STORAGE_KEY,) if include_reserve else ()),
+                require_complete=True,
+            )
+        except DjiPowerDisconnectedError:
+            raise
+        except DjiPowerError as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            self._merge_data(invalidated)
+            raise
+        if include_reserve and (
+            not isinstance(update.get("key_06"), str)
+            or len(update["key_06"]) < 8
+        ):
+            self._merge_data(reserve_invalidated)
+        if (
+            isinstance(update.get("key_05"), str)
+            and isinstance(update.get("recharge_limit"), int)
+            and isinstance(update.get("discharge_limit"), int)
+        ):
+            return update
+        if not self.is_connected:
+            raise DjiPowerDisconnectedError("Bluetooth connection lost")
+        self._merge_data(invalidated)
+        # An omitted or malformed record may settle on a later confirmation read.
+        return {}
+
+    async def _read_energy_reserve(self) -> str:
+        """Require a fresh reserve record; unreadable state disables its controls."""
+        try:
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                update = await self._read_config(
+                    ENERGY_STORAGE_KEY, require_complete=True
+                )
+            current = update.get("key_06")
+            if (
+                not isinstance(current, str)
+                or update.get("energy_reserve_available") is None
+            ):
+                raise DjiPowerError("station omitted valid backup reserve state")
+        except DjiPowerDisconnectedError:
+            raise
+        except (DjiPowerError, BleakError, EOFError, TimeoutError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            self._merge_data(_RESERVE_INVALIDATION)
+            raise DjiPowerError(
+                f"cannot read backup reserve configuration: {str(error) or 'timed out'}"
+            ) from error
+        return current
+
+    async def _read_station_rules(self) -> None:
+        """Read the rules for the Auto car-charger layout and port switches."""
+        try:
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                update = await self._read_config(RULES_KEY, require_complete=True)
+        except DjiPowerDisconnectedError:
+            raise
+        except (DjiPowerError, BleakError, EOFError, TimeoutError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            self._merge_data(_RULES_INVALIDATION)
+            raise DjiPowerError(
+                f"cannot read station rules: {str(error) or 'timed out'}"
+            ) from error
+        if "key_0e" not in update:
+            # Without rules, DJI Home shows both direction voltages in Auto and
+            # no port switches.
+            self._merge_data(
+                {
+                    "key_0e": None,
+                    "station_rules": [],
+                    "car_auto_threshold": False,
+                    "port_switches_offered": False,
+                }
+            )
+
+    async def _wait_for_energy_reserve(self, expected: dict[str, object]) -> None:
+        """Confirm the reserve from fresh reads, delaying only later attempts."""
+        for attempt in range(READBACK_RETRIES + 1):
+            if attempt:
+                await asyncio.sleep(READBACK_RETRY_INTERVAL)
+            await self._read_energy_reserve()
+            if all(self.data.get(key) == value for key, value in expected.items()):
+                return
+        raise DjiPowerError("station did not report the requested backup reserve")
+
+    async def _wait_for_eco_mode_values(self, expected: dict[str, object]) -> None:
+        for attempt in range(READBACK_RETRIES + 1):
+            if attempt:
+                await asyncio.sleep(READBACK_RETRY_INTERVAL)
+            await self._read_eco_mode()
+            if all(self.data.get(key) == value for key, value in expected.items()):
+                return
+        raise DjiPowerError("station did not report the requested eco-mode values")
+
+    async def _read_time_periods(self) -> list[dict[str, object]]:
+        """Require a valid fresh schedule, including an explicit empty list."""
+        try:
+            async with asyncio.timeout(DEFAULT_REQUEST_TIMEOUT):
+                update = await self._read_config(
+                    TIME_PERIODS_KEY, require_complete=True
+                )
+            periods = update.get("time_periods")
+            if not isinstance(periods, list):
+                raise DjiPowerError("station omitted or returned invalid time periods")
+        except DjiPowerDisconnectedError:
+            raise
+        except (DjiPowerError, BleakError, EOFError, TimeoutError) as error:
+            if not self.is_connected:
+                raise DjiPowerDisconnectedError("Bluetooth connection lost") from error
+            self._merge_data({"time_periods": None, "key_16": None})
+            raise DjiPowerError(str(error)) from error
+        return periods
+
+    async def get_time_periods(self) -> list[dict[str, object]]:
+        """Read a fresh tariff schedule without interrupting a write."""
+        if not supports_feature(self.model, ModelFeature.TARIFF_SCHEDULE):
+            raise DjiPowerError("time periods are not supported on this model")
+        async with self._operation_lock:
+            periods = await self._read_time_periods()
+            await self._read_eco_mode()
+            await self._read_station_rules()
+            if not feature_available(self.data, ModelFeature.TARIFF_SCHEDULE):
+                raise DjiPowerError("the station does not offer time-period control")
+            # Return an independent normalized copy for editors to retain.
+            return normalize_time_periods(periods, allow_overlap=True)
+
+    async def set_time_periods(
+        self, periods: object, *, expected_periods: object | None = None
+    ) -> None:
+        """Replace tariff periods and confirm a fresh matching list."""
+        if not supports_feature(self.model, ModelFeature.TARIFF_SCHEDULE):
+            raise DjiPowerError("time-period control is not supported on this model")
+        try:
+            requested = normalize_time_periods(periods)
+            expected = (
+                normalize_time_periods(expected_periods, allow_overlap=True)
+                if expected_periods is not None
+                else None
+            )
+        except ProtocolError as error:
+            raise DjiPowerError(str(error)) from error
+        async with self._operation_lock:
+            current = await self._read_time_periods()
+            eco_mode = await self._read_eco_mode()
+            await self._read_station_rules()
+            if not feature_available(self.data, ModelFeature.TARIFF_SCHEDULE):
+                raise DjiPowerError("the station does not offer time-period control")
+            try:
+                validate_time_periods_mode(eco_mode, clearing=not requested)
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            if requested == current:
+                return
+            if expected is not None and current != expected:
+                raise DjiPowerScheduleChangedError(
+                    "the station's time periods changed while you were editing"
+                )
+            await self._set(
+                build_time_periods_set_payload(requested),
+                (TIME_PERIODS_KEY, RULES_KEY),
+            )
+            for attempt in range(READBACK_RETRIES + 1):
+                if attempt:
+                    await asyncio.sleep(READBACK_RETRY_INTERVAL)
+                if await self._read_time_periods() == requested:
+                    return
+            raise DjiPowerError("station did not report the requested time periods")
+
+    async def _set(self, payload: bytes, expected_keys: tuple[int, ...]) -> None:
+        response = await self._request(SET_COMMAND, payload)
+        try:
+            parse_set_ack(self._decode_payload(response), expected_keys)
+        except ProtocolError as error:
+            raise DjiPowerError(str(error)) from error
+
+    async def _wait_for_charge_limits(self, expected: dict[str, object]) -> None:
+        """Confirm fresh limits and any written reserve in the same snapshot."""
+        for attempt in range(READBACK_RETRIES + 1):
+            if attempt:
+                await asyncio.sleep(READBACK_RETRY_INTERVAL)
+            update = await self._read_charge_limits(
+                include_reserve="key_06" in expected
+            )
+            if all(
+                key in update and update[key] == value
+                for key, value in expected.items()
+            ):
+                return
+        raise DjiPowerError("station did not report the requested values")
+
+    async def set_ac(self, enabled: bool) -> None:
+        """Set the legacy main AC output using the shared port policy."""
+        await self.set_port_switch(2, 1, enabled)
+
+    @staticmethod
+    def _accessory_row(
+        update: dict[str, object], state_key: str, identity: dict[str, int]
+    ) -> dict[str, int]:
+        rows = update.get(state_key)
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict) and all(
+                    row.get(key) == value for key, value in identity.items()
+                ):
+                    return row
+        raise DjiPowerError("the requested accessory is no longer available")
+
+    async def _wait_for_accessory_values(
+        self,
+        config_key: int,
+        state_key: str,
+        identity: dict[str, int],
+        expected: dict[str, int],
+    ) -> None:
+        """Confirm the addressed accessory from fresh reads, never cached rows."""
+        for attempt in range(READBACK_RETRIES + 1):
+            if attempt:
+                await asyncio.sleep(READBACK_RETRY_INTERVAL)
+            update = await self._read_accessory_config(config_key, state_key)
+            row = self._accessory_row(update, state_key, identity)
+            if all(row.get(key) == value for key, value in expected.items()):
+                return
+        raise DjiPowerError("accessory did not report the requested values")
+
+    async def set_sdc(self, interface_type: int, seq: int, enabled: bool) -> None:
+        """Set an SDC output offered by the station's fresh rules."""
+        if type(interface_type) is not int or interface_type not in (5, 6):
+            raise DjiPowerError("SDC controls require an SDC or SDC Lite interface")
+        await self.set_port_switch(interface_type, seq, enabled)
+
+    async def set_usb(self, interface_type: int, seq: int, enabled: bool) -> None:
+        """Set a USB output offered by the station's fresh rules."""
+        if type(interface_type) is not int or interface_type not in (3, 4):
+            raise DjiPowerError("USB controls require a USB-A or USB-C interface")
+        await self.set_port_switch(interface_type, seq, enabled)
+
+    async def set_port_switch(
+        self, interface_type: int, seq: int, enabled: bool
+    ) -> None:
+        """Read rules and switches under one lock, then confirm the target row."""
+        if not is_known_model(self.model):
+            raise DjiPowerError("port controls are not supported on this model")
+        async with self._operation_lock:
+            update = await self._read_accessory_config(
+                POWER_SWITCH_KEY, "power_switches"
+            )
+            await self._read_station_rules()
+            try:
+                payload = build_port_switch_set_payload(
+                    update["key_0d"], interface_type, seq, enabled,
+                    station_rules=self.data.get("station_rules"),
+                )
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            offered = eligible_port_switches({
+                **update, "station_rules": self.data.get("station_rules")
+            })
+            if (interface_type, seq) not in offered:
+                raise DjiPowerError("the station does not offer this output control")
+            await self._set(payload, (POWER_SWITCH_KEY, RULES_KEY))
+            await self._wait_for_accessory_values(
+                POWER_SWITCH_KEY, "power_switches",
+                {"type": interface_type, "seq": seq},
+                {"sw": 1 if enabled else 2},
+            )
+
+    async def set_car_charger(
+        self,
+        interface_type: int,
+        seq: int,
+        accessory_type: int,
+        *,
+        enabled: bool | None = None,
+        mode: int | None = None,
+        **numbers: float | None,
+    ) -> None:
+        """Edit one reported charger setting and confirm its addressed row.
+
+        ``numbers`` takes a ``CAR_CHARGER_NUMBERS`` keyword, such as
+        ``charge_power_w``.
+        """
+        if not supports_feature(self.model, ModelFeature.SDC_CONTROLS):
+            raise DjiPowerError("car-charger controls are not supported on this model")
+        identity = {
+            "interface_type": interface_type, "seq": seq, "type": accessory_type
+        }
+        async with self._operation_lock:
+            update = await self._read_accessory_config(CAR_CHARGERS_KEY, "car_chargers")
+            await self._read_station_rules()
+            try:
+                payload = build_car_charger_set_payload(
+                    update["key_0a"], interface_type, seq, accessory_type,
+                    enabled=enabled, mode=mode,
+                    auto_threshold=self.data.get("car_auto_threshold"), **numbers,
+                )
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            requested = self._accessory_row(
+                parse_telemetry(payload), "car_chargers", identity
+            )
+            # The builder accepted exactly one change.
+            changed = [name for name, value in numbers.items() if value is not None]
+            if changed:
+                # A number also depends on the enabled mode that offers it.
+                fields = ["sw", "mode", f"{CAR_CHARGER_NUMBERS[changed[0]][0]}_v"]
+            else:
+                fields = ["sw"] if enabled is not None else ["mode"]
+            expected = {field: requested[field] for field in fields}
+            await self._set(payload, tuple(parse_keyed_values(payload)))
+            await self._wait_for_accessory_values(
+                CAR_CHARGERS_KEY, "car_chargers", identity, expected
+            )
+
+    async def set_charge_limits(
+        self,
+        *,
+        discharge_limit: int | None = None,
+        recharge_limit: int | None = None,
+    ) -> None:
+        """Set one or both energy-management limits."""
+        async with self._operation_lock:
+            update = await self._read_charge_limits(include_reserve=True)
+            current = update.get("key_05")
+            old_discharge = update.get("discharge_limit")
+            old_recharge = update.get("recharge_limit")
+            if (
+                not isinstance(current, str)
+                or not isinstance(old_discharge, int)
+                or not isinstance(old_recharge, int)
+            ):
+                raise DjiPowerError("charge-limit state is unavailable")
+            requested_discharge = (
+                old_discharge if discharge_limit is None else discharge_limit
+            )
+            requested_recharge = (
+                old_recharge if recharge_limit is None else recharge_limit
+            )
+            try:
+                payload = build_charge_limits_set_payload(
+                    current, requested_discharge, requested_recharge,
+                    reserve_value=update.get("key_06"),
+                )
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            written = parse_keyed_values(payload)
+            await self._set(payload, tuple(written))
+            expected: dict[str, object] = {
+                "discharge_limit": requested_discharge,
+                "recharge_limit": requested_recharge,
+            }
+            if ENERGY_STORAGE_KEY in written:
+                expected["key_06"] = written[ENERGY_STORAGE_KEY].hex()
+            await self._wait_for_charge_limits(expected)
+
+    async def set_energy_reserve(
+        self, *, enabled: bool | None = None, percent: int | None = None
+    ) -> None:
+        """Set the custom backup reserve and require a matching fresh readback."""
+        if not supports_feature(self.model, ModelFeature.RESERVE_CONTROL):
+            raise DjiPowerError("backup reserve control is not supported on this model")
+        async with self._operation_lock:
+            bounds = None
+            if percent is not None:
+                limits = await self._read_charge_limits()
+                bounds = energy_reserve_bounds(
+                    limits.get("discharge_limit"), limits.get("recharge_limit")
+                )
+                if bounds is None:
+                    raise DjiPowerError(
+                        "charge limits for the backup reserve range are unavailable"
+                    )
+            current = await self._read_energy_reserve()
+            try:
+                payload = build_energy_reserve_set_payload(
+                    current, enabled=enabled, percent=percent, bounds=bounds
+                )
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            await self._set(payload, (ENERGY_STORAGE_KEY, RULES_KEY))
+            expected: dict[str, object] = {}
+            if enabled is not None:
+                expected["energy_reserve_enabled"] = enabled
+            if percent is not None:
+                expected["energy_reserve"] = percent
+            await self._wait_for_energy_reserve(expected)
+
+    async def set_charge_power(self, watts: int) -> None:
+        """Set manual Time of Use recharge watts and require matching readback."""
+        if not supports_feature(self.model, ModelFeature.TOU_POWER_CONTROL):
+            raise DjiPowerError("charge-power control is not supported on this model")
+        async with self._operation_lock:
+            current = await self._read_eco_mode()
+            await self._require_tou_capability()
+            try:
+                payload = build_charge_power_set_payload(current, watts)
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            await self._set(payload, (ECO_MODE_KEY, RULES_KEY))
+            await self._wait_for_eco_mode_values(
+                {"charge_power_available": True, "charge_power_w": watts}
+            )
+
+    async def set_discharge_power(self, watts: int) -> None:
+        """Set manual Time of Use discharge watts and require matching readback."""
+        if not supports_feature(self.model, ModelFeature.TOU_POWER_CONTROL):
+            raise DjiPowerError(
+                "discharge-power control is not supported on this model"
+            )
+        async with self._operation_lock:
+            current = await self._read_eco_mode()
+            await self._require_tou_capability()
+            try:
+                payload = build_discharge_power_set_payload(current, watts)
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            await self._set(payload, (ECO_MODE_KEY, RULES_KEY))
+            await self._wait_for_eco_mode_values(
+                {"discharge_power_available": True, "discharge_power_w": watts}
+            )
+
+    async def set_power_adjustment(self, mode: str) -> None:
+        """Select Automatic/Manual power adjustment and confirm its readback."""
+        if not supports_feature(self.model, ModelFeature.TOU_POWER_CONTROL):
+            raise DjiPowerError(
+                "power-adjustment control is not supported on this model"
+            )
+        async with self._operation_lock:
+            current = await self._read_eco_mode()
+            await self._require_tou_capability()
+            try:
+                payload = build_power_adjustment_set_payload(current, mode)
+            except ProtocolError as error:
+                raise DjiPowerError(str(error)) from error
+            await self._set(payload, (ECO_MODE_KEY, RULES_KEY))
+            await self._wait_for_eco_mode_values({"power_adjustment": mode})
+
+    async def _require_tou_capability(self) -> None:
+        """Check fresh station rules before editing an existing TOU setup."""
+        await self._read_station_rules()
+        if not feature_available(self.data, ModelFeature.TOU_POWER_CONTROL):
+            raise DjiPowerError("the station does not offer Time of Use power control")

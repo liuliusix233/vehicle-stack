@@ -1,0 +1,17 @@
+[Unit]
+Description=Car smart button -> AC toggle (car Pi)
+After=bluetooth.target dji-ble-bridge.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/<USER>/dji_ble
+ExecStart=/home/<USER>/dji_ble/venv/bin/python /home/<USER>/dji_ble/btn_watch.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/<USER>/dji_ble/btn_watch.log
+StandardError=append:/home/<USER>/dji_ble/btn_watch.log
+
+[Install]
+WantedBy=multi-user.target

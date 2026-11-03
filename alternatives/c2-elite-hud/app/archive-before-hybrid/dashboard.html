@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=480, initial-scale=1.0, maximum-scale=1.0">
+<title>HUD Dashboard</title>
+<style>
+  @font-face {
+    font-family: 'Odibee Sans';
+    src: url('OdibeeSans-Regular.ttf') format('truetype');
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; outline:none; }
+  *:focus { outline:none; }
+  :focus-visible { outline:none; }
+  ::-webkit-focus-ring-color { outline:none; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#000; }
+  html { -webkit-tap-highlight-color:transparent; }
+  body {
+    display:flex; align-items:center; justify-content:center;
+  }
+
+  .hud {
+    width:100vw; height:100vh;
+    background:#000; color:#fff;
+    font-family:'Odibee Sans','Courier New',monospace;
+    display:grid;
+    grid-template-columns: [c1] 1fr [c2] 1fr [c3] 1fr [c4] 1fr;
+    grid-template-rows: [r1] 1fr [r2] 1fr [r3] 1fr;
+    padding:0 4vw;
+    position:relative;
+  }
+
+  /* ===== Compass (top center) ===== */
+  .compass {
+    grid-column:2/4; grid-row:1;
+    display:flex; flex-direction:column;
+    justify-content:flex-end; align-items:center;
+    padding-bottom:1.5vh;
+  }
+  .compass .arrow {
+    width:0; height:0;
+    border-left:1.8vw solid transparent;
+    border-right:1.8vw solid transparent;
+    border-bottom:3vw solid #FF5722;
+    margin-bottom:0.3vh;
+  }
+  .compass .txt { font-size:4.5vw; line-height:1; color:#FF5722; }
+  .compass .deg { font-size:2vw; color:#445566; margin-top:0.3vh; }
+
+  /* ===== Speed section (left center) ===== */
+  .speed-section {
+    grid-column:1/3; grid-row:2;
+    display:flex; align-items:center;
+  }
+  .speed-section .cluster {
+    display:flex; align-items:center; gap:1vw;
+  }
+  .speed-section .speed-val {
+    font-size:18vw; line-height:1;
+    width:26vw; text-align:center;
+    color:#fff;
+  }
+  .rpm-strip {
+    width:1.2vw; height:12vh;
+    background:#0a1a2a; border-radius:0.3vw;
+    position:relative; overflow:hidden;
+  }
+  .rpm-strip .fill {
+    position:absolute; bottom:0; left:0; width:100%;
+    background:linear-gradient(to top, #3399ff, #66bbff, #fff);
+    border-radius:0.3vw;
+    transition:height 0.12s ease;
+  }
+  .gear-group {
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    height:12vh; width:15vw; gap:0.8vh;
+  }
+  .gear-group .gear {
+    width:6vw; height:6vw;
+    background:#fff; border-radius:0.5vw;
+    display:flex; justify-content:center; align-items:center;
+    font-size:3.5vw; line-height:1; color:#000;
+  }
+  .gear-group .rpm-label {
+    font-size:3vw; color:#445566; line-height:1; text-align:center;
+  }
+
+  /* ===== Bar section (right center): Volt + Fuel + Cadillac ===== */
+  .bar-section {
+    grid-column:3/5; grid-row:2;
+    display:flex; flex-direction:column;
+    justify-content:center; gap:1.5vh;
+  }
+  .bar-item { display:flex; flex-direction:column; gap:0.4vh; }
+  .bar-item .lbl {
+    display:flex; justify-content:space-between;
+    font-size:2.8vw; line-height:1;
+  }
+  .bar-item .lbl .k { color:#445566; }
+  .bar-item .lbl .v { color:#FF5722; }
+  .bar-item .lbl .p { color:#445566; }
+  .bar-bg {
+    width:100%; height:1.5vh;
+    background:#0a1a2a; border-radius:0.5vh; overflow:hidden;
+  }
+  .bar-fill { height:100%; border-radius:0.5vh; transition:width 0.2s; }
+  .bar-fill.b  { background:#3399ff; }
+  .bar-fill.o  { background:#FF5722; }
+  .bar-fill.g  { background:#4CAF50; }
+  .bar-fill.w  { background:#ff3300; }
+
+  /* ===== Status left (bottom left) ===== */
+  .status-left {
+    grid-column:1/3; grid-row:3;
+    display:flex; align-items:center;
+    gap:1.5vw;
+  }
+  .status-left .group {
+    display:flex; align-items:center; gap:1vw;
+    height:4vh;
+  }
+  .wifi svg { width:4vw; height:4vw; fill:#445566; display:block; }
+  .wifi.on svg { fill:#fff; }
+  .pi-tag {
+    border:1px solid #3399ff; color:#3399ff;
+    border-radius:0.5vw; padding:0.2vw 1vw;
+    font-size:3vw; line-height:1.3;
+    display:flex; align-items:center;
+  }
+  .odo-num { font-size:5vw; line-height:1; color:#fff; }
+  .odo-unit { font-size:3vw; color:#445566; margin-left:0.3vw; }
+
+  /* ===== Clock (bottom right) ===== */
+  .clock {
+    grid-column:3/5; grid-row:3;
+    display:flex; align-items:center;
+    justify-content:flex-end;
+  }
+  .clock .t { font-size:5vw; line-height:1; letter-spacing:0.2vw; color:#fff; }
+</style>
+</head>
+<body>
+<div class="hud" id="hud">
+  <div class="compass">
+    <div class="arrow"></div>
+    <div class="txt" id="compassTxt">N</div>
+    <div class="deg" id="compassDeg">0°</div>
+  </div>
+
+  <div class="speed-section">
+    <div class="cluster">
+      <div class="speed-val" id="speedVal">--</div>
+      <div class="rpm-strip"><div class="fill" id="rpmFill" style="height:0%"></div></div>
+      <div class="gear-group">
+        <div class="gear" id="gearBox">N</div>
+        <div class="rpm-label" id="rpmLabel">--</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar-section">
+    <div class="bar-item">
+      <div class="lbl"><span><span class="k">BAT</span><span class="v" id="voltVal">--</span></span><span class="p" id="voltPct">--</span></div>
+      <div class="bar-bg"><div class="bar-fill b" id="powerBar" style="width:0%"></div></div>
+    </div>
+    <div class="bar-item">
+      <div class="lbl"><span><span class="k">FUEL</span><span class="v" id="fuelVal">--</span><span class="k"> L/100KM</span></span><span class="p" id="fuelPct">--</span></div>
+      <div class="bar-bg"><div class="bar-fill o" id="fuelBar" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <div class="status-left">
+    <div class="group">
+      <div class="wifi" id="wifiIcon">
+        <svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+      </div>
+      <div class="pi-tag" id="piTag">PI</div>
+      <span class="odo-num" id="odoNum">--</span>
+      <span class="odo-unit">KM</span>
+    </div>
+  </div>
+
+  <div class="clock">
+    <span class="t" id="clockT">--:--</span>
+  </div>
+</div>
+
+<script>
+const st = { speed:-1, rpm:-1, voltage:-1, power:-1, fuelCons:-1, fuelLevel:-1,
+             odo:-1, heading:-1, gear:0, time:'--:--', wifiOn:false, piOn:false };
+
+const D = {
+  sv:document.getElementById('speedVal'),
+  rb:document.getElementById('rpmFill'),
+  rl:document.getElementById('rpmLabel'),
+  gb:document.getElementById('gearBox'),
+  vv:document.getElementById('voltVal'),
+  vp:document.getElementById('voltPct'),
+  pb:document.getElementById('powerBar'),
+  fv:document.getElementById('fuelVal'),
+  fp:document.getElementById('fuelPct'),
+  fb:document.getElementById('fuelBar'),
+  on:document.getElementById('odoNum'),
+  ct:document.getElementById('clockT'),
+  ct2:document.getElementById('compassTxt'),
+  cd:document.getElementById('compassDeg'),
+  wi:document.getElementById('wifiIcon'),
+  pt:document.getElementById('piTag'),
+};
+
+function calcGear(s,r){
+  if(s<1||r<100)return 0;
+  const ra=s/(r/1000),tt=[0,11.8,16.1,21,26.8,33.7,41.5,49.6,59.4,999];
+  for(let g=1;g<=9;g++)if(ra<tt[g])return g;
+  return 9;
+}
+function hdg(d){
+  const a=['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return a[Math.round(((d+360)%360)/22.5)%16];
+}
+function draw(){
+  const s=st, ok=s.speed>=0;
+  D.sv.textContent=ok?String(Math.round(s.speed)):'--';
+  if(s.rpm>=0){D.rb.style.height=Math.min(s.rpm/7000*100,100)+'%';D.rl.textContent=(s.rpm/1000).toFixed(1)+'k';}
+  else{D.rb.style.height='0%';D.rl.textContent='--';}
+  const g=ok&&s.rpm>=0?calcGear(s.speed,s.rpm):0;
+  D.gb.textContent=g>0?String(g):'N';
+  
+  D.vv.textContent=s.voltage>=0?s.voltage.toFixed(1)+'V':'--';
+  D.vp.textContent=s.power>=0?Math.round(s.power)+'%':'--';
+  const pp=s.power>=0?Math.min(100,s.power):0;
+  D.pb.style.width=pp+'%';D.pb.className='bar-fill '+(pp<20?'w':'b');
+  
+  D.fv.textContent=s.fuelCons>=0?s.fuelCons.toFixed(1):'--';
+  D.fp.textContent=s.fuelLevel>=0?Math.round(s.fuelLevel)+'%':'--';
+  const fp=s.fuelLevel>=0?Math.min(100,s.fuelLevel):0;
+  D.fb.style.width=fp+'%';D.fb.className='bar-fill '+(fp<15?'w':'o');
+  
+  D.ct2.textContent=s.heading>=0?hdg(s.heading):'---';
+  D.cd.textContent=s.heading>=0?Math.round(s.heading)+'°':'---';
+  D.on.textContent=s.odo>=0?String(Math.round(s.odo)):'--';
+  D.wi.className='wifi'+(s.wifiOn?' on':'');
+  D.pt.style.borderColor=s.piOn?'#3399ff':'#445566';
+  D.pt.style.color=s.piOn?'#3399ff':'#445566';
+}
+function updateData(d){
+  if(d.speed!==undefined&&d.speed>=0)st.speed=d.speed;
+  if(d.rpm!==undefined&&d.rpm>=0)st.rpm=d.rpm;
+  if(d.voltage!==undefined&&d.voltage>=0)st.voltage=d.voltage;
+  if(d.power!==undefined&&d.power>=0)st.power=d.power;
+  if(d.fuelCons!==undefined&&d.fuelCons>=0)st.fuelCons=d.fuelCons;
+  if(d.fuelLevel!==undefined&&d.fuelLevel>=0)st.fuelLevel=d.fuelLevel;
+  if(d.odo!==undefined&&d.odo>=0)st.odo=d.odo;
+  if(d.heading!==undefined&&d.heading>=0)st.heading=d.heading;
+  if(d.wifiOn!==undefined)st.wifiOn=d.wifiOn;
+  if(d.piOn!==undefined)st.piOn=d.piOn;
+  if(d.connected!==undefined)st.piOn=d.connected;
+}
+setInterval(()=>{const n=new Date();document.getElementById('clockT').textContent=
+  String(n.getHours()).padStart(2,'0')+':'+String(n.getMinutes()).padStart(2,'0')},10000);
+function loop(){draw();requestAnimationFrame(loop)}loop();
+</script>
+</body>
+</html>

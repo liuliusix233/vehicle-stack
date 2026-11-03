@@ -1,0 +1,48 @@
+# --- secrets ---
+.env
+*.local
+secrets/
+**/dji_cloud_config.json
+**/dji_arm_config.json
+**/*creds*.json
+**/*.pem
+**/*.jks
+**/*.keystore
+
+# --- android ---
+build/
+dist/
+.gradle/
+*.apk
+*.aab
+local.properties
+
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# --- logs / runtime data ---
+*.log
+*.log.*
+*.gz
+*.pcap*
+*.sqlite
+*.db
+
+# --- media dumps ---
+*.png
+*.jpg
+*.jpeg
+!software/**/src/main/assets/**
+!software/**/src/main/res/**
+!hardware/images/**
+!hardware/cad/**
+*.mp4
+*.tar.gz
+
+# --- os ---
+.DS_Store
+Thumbs.db

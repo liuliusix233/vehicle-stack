@@ -1,0 +1,41 @@
+# HA 侧示例（可选）
+# 放到 /config/packages/car_vehicle.yaml，或在 configuration.yaml 里 !include
+
+template:
+  - sensor:
+      - name: "车辆挡位"
+        unique_id: car_gear
+        state: "{{ states('sensor.car_gear_raw') }}"
+        icon: mdi:car-shift-pattern
+      - name: "车辆续航 km"
+        unique_id: car_range_km
+        unit_of_measurement: "km"
+        state: "{{ (states('sensor.car_range_m') | float(0) / 1000) | round(0) }}"
+
+automation:
+  - id: car_power_low_alert
+    alias: "车载电源低电量告警"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.car_power_soc
+        below: 20
+        for: "00:05:00"
+    action:
+      - service: notify.notify
+        data:
+          title: "车载电源低电量"
+          message: "SOC {{ states('sensor.car_power_soc') }}%，请补电或关闭负载。"
+
+  - id: car_power_cutoff
+    alias: "车载电源极低电量自动断载"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.car_power_soc
+        below: 10
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.car_power_usb
+      - service: notify.notify
+        data:
+          message: "SOC < 10%，已关闭 USB 输出保护电源。"

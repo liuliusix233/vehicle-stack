@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.vox.castsink"
+    android:versionCode="149"
+    android:versionName="v149">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.car.permission.CAR_SPEED" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
+    <uses-permission android:name="android.car.permission.CAR_ENERGY" />
+    <uses-permission android:name="android.car.permission.CAR_INFO" />
+    <uses-permission android:name="android.car.permission.CAR_DRIVING_STATE" />
+    <uses-permission android:name="gm.permission.NAV_SERVICE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <application
+        android:allowBackup="false"
+        android:label="CarBridge"
+        android:resizeableActivity="true"
+        android:theme="@style/AppTheme">
+
+        <!-- GM 车机 cluster HMI 系统库（/system/etc/permissions/info3_cluster_library.xml） -->
+        <uses-library android:name="info3_cluster" android:required="false" />
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 仪表屏专用 Activity：供桌面/ShellBridge 拉起（am start display 参数见 permissions-notes.md） -->
+        <activity
+            android:name=".ClusterCastActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|density|smallestScreenSize"
+            android:exported="true"
+            android:theme="@style/AppTheme.Transparent" />
+        <!-- SWC 探针：验证方向盘按键是否送达第三方 App -->
+        <activity
+            android:name=".SwcProbeActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true" />
+
+        <!-- ClusterHMI 探针：只读枚举 + 一次 displayOverlay 测试（5s 自动取消） -->
+        <activity
+            android:name=".ClusterHmiProbeActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true"
+            android:theme="@style/AppTheme" />
+
+        <service android:name=".AutoStartService" android:exported="false" />
+
+        <!-- 合并版 ShellBridge：8888 命令服务（前台常驻） -->
+        <service
+            android:name=".ShellService"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <receiver android:name=".VehicleReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="patac.vehicle.ignition.onchange" />
+                <action android:name="patac.drivemode.onchange" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
