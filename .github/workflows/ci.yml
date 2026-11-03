@@ -1,5 +1,13 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -15,5 +23,5 @@ jobs:
       - name: shell syntax
         run: |
           for f in $(git ls-files '*.sh'); do bash -n "$f" || exit 1; done
-      - name: docs links
+      - name: docs present
         run: test -f docs/HOW-WE-BUILT-IT.md && test -f AGENTS.md && test -f docs/TROUBLESHOOTING.md
