@@ -122,6 +122,8 @@ vehicle-stack/
 │   ├── HUD-MAP-RENDERING.md # 地图渲染选型
 │   ├── CARBRIDGE.md       # 车机双 App 合并与运维
 │   ├── CASTSINK-TUTORIAL.md # 投屏接收端原理拆解
+│   ├── CLUSTER-ENV.md     # 车机环境档案（系统/屏幕/fingerprint）
+│   ├── CLUSTER-CHANGELOG.md # 仪表投屏迭代日志（v1–v9）
 │   └── RELEASE.md
 ├── hardware/              # BOM、安装、实拍
 ├── software/              # 模块源码

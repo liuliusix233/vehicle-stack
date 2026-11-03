@@ -26,6 +26,8 @@
 | 8 | `docs/OBD-ARCHITECTURE.md` | OBD（Vgate）采集链路 |
 | 9 | `docs/HUD-RENDERER.md` | fb0 渲染与 Pi 稳定性 |
 | 10 | `docs/CASTSINK-TUTORIAL.md` | 投屏接收端原理（适合入门） |
+| 11 | `docs/CLUSTER-ENV.md` | 车机环境档案：display 2、分辨率、density、fingerprint |
+| 12 | `docs/CLUSTER-CHANGELOG.md` | 仪表投屏 v1–v9 迭代与失败记录 |
 | 5 | 具体模块源码 | 见下表 |
 
 ## 模块：能直接搬 vs 要重写

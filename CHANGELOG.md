@@ -17,6 +17,7 @@
 - `docs/NAV-DATA.md` — 车机导航链路与防卡顿规则
 - `docs/GPS-ALT-SLOPE.md` — GPS 取值、海拔与坡度算法
 - `hardware/CAD.md` + `hardware/cad/` — HUD 外壳 STL 与装配说明
+- `docs/CLUSTER-ENV.md`、`docs/CLUSTER-CHANGELOG.md` — 车机环境与仪表投屏日志
 - `docs/OBD-ARCHITECTURE.md`、`docs/HUD-RENDERER.md`、`docs/HUD-MAP-RENDERING.md`、`docs/CARBRIDGE.md`、`docs/CASTSINK-TUTORIAL.md` — 历史技术档案（已脱敏）
 - `docs/48V-HYBRID.md` — 48V 轻混功率推算模型（估算，非实测）
 - `docs/gallery/` — 实拍验收证据
